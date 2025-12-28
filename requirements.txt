@@ -1,0 +1,10 @@
+mss
+opencv-python
+numpy
+pydirectinput
+gymnasium
+stable-baselines3
+torch
+torchvision
+stable-baselines3[extra]
+torchaudio

@@ -1,0 +1,6 @@
+.venv
+logs
+models
+
+assets/crops
+.idea
