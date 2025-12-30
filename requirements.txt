@@ -8,3 +8,4 @@ torch
 torchvision
 stable-baselines3[extra]
 torchaudio
+sb3-contrib

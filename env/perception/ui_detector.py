@@ -18,12 +18,26 @@ class UIDetector:
         self.change_assort_gray_anchor = self._load_anchor(
             os.path.join(assets_dir, "change_assort_gray_anchor.png")
         )
-        self.restart_anchor = self._load_anchor(
-            os.path.join(assets_dir, "restart_button_anchor.png")
-        )
+        self.restart_anchors = [
+            self._load_anchor(
+                os.path.join(assets_dir, "restart_button_anchor.png")
+            ),
+            self._load_anchor(
+                os.path.join(assets_dir, "restart_button_2_anchor.png")
+            )
+        ]
         self.overclock_anchor = self._load_anchor(
             os.path.join(assets_dir, "overclock_anchor.png")
         )
+
+        self.gameplay_anchor = self._load_anchor(
+            os.path.join(assets_dir, "gameplay_anchor.png")
+        )
+
+        self.chest_anchor = self._load_anchor(
+            os.path.join(assets_dir, "chest_anchor.png")
+        )
+
         self.continue_button_anchors = [
             self._load_anchor(
                 os.path.join(assets_dir, "continue_button_anchor.png")
@@ -39,6 +53,8 @@ class UIDetector:
         self.change_assort_roi = (65, 73, 128, 148)
         self.continue_button_roi = (127, 139, 70, 90)
         self.overclock_roi = (117, 129, 70, 90)
+        self.gameplay_roi = (9, 14, 128, 140)
+        self.chest_roi = (23, 31, 56, 106)
 
         # --- thresholds ---
         self.levelup_threshold = 0.65
@@ -81,32 +97,37 @@ class UIDetector:
     # Main detection
     # ==================================================
 
-    def detect(self, frame, hp):
+    def detect(self, frame):
         """
         frame: BGR (H, W, 3)
         """
 
-        levelup_roi = self._crop(frame, self.levelup_roi)
-        continue_button_roi = self._crop(frame, self.continue_button_roi)
+        gameplay_roi = self._crop(frame, self.gameplay_roi)
+        if self._match(gameplay_roi, self.gameplay_anchor) >= 0.7:
+            return "gameplay"
+
         assort_roi = self._crop(frame, self.change_assort_roi)
-        overclock_roi = self._crop(frame, self.overclock_roi)
-
-        if hp < self.death_check_threshold:
-            restart_roi = self._crop(frame, self.restart_roi)
-            if self._match(restart_roi, self.restart_anchor) >= self.button_threshold:
-                return "restart"
-
-        if self._match(overclock_roi, self.overclock_anchor) >= self.button_threshold:
-            return "overclock"
-
-        if max([self._match(continue_button_roi, anchor) for anchor in self.continue_button_anchors]) >= self.button_threshold:
-            return "continue"
-
-        # --- LEVEL UP ---
+        levelup_roi = self._crop(frame, self.levelup_roi)
         if self._detect_levelup(levelup_roi, assort_roi):
             return "levelup"
 
-        return "gameplay"
+        restart_roi = self._crop(frame, self.restart_roi)
+        if max([self._match(restart_roi, anchor) for anchor in self.restart_anchors]) >= self.button_threshold:
+            return "restart"
+
+        chest_roi = self._crop(frame, self.chest_roi)
+        if self._match(chest_roi, self.chest_anchor) >= self.button_threshold:
+            return "chest"
+
+        overclock_roi = self._crop(frame, self.overclock_roi)
+        if self._match(overclock_roi, self.overclock_anchor) >= self.button_threshold:
+            return "overclock"
+
+        continue_button_roi = self._crop(frame, self.continue_button_roi)
+        if max([self._match(continue_button_roi, anchor) for anchor in self.continue_button_anchors]) >= self.button_threshold:
+            return "continue"
+
+        return "idle"
 
     # ==================================================
     # Level-up logic

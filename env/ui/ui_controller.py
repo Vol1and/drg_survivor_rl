@@ -32,9 +32,15 @@ class UIController:
         print(f"[UI] Continue click at {self.continue_button_pos}")
         self._click(*self.continue_button_pos)
 
+    def handle_chest(self):
+        print(f"[UI] Chest click at {self.levelup_click_pos}")
+        self._click(*self.levelup_click_pos)
+        time.sleep(1)
+
     def handle_overclock(self):
         print(f"[UI] Overclock click at {self.overclock_click_pos}")
         self._click(*self.overclock_click_pos)
+        time.sleep(1)
 
     def handle_death_restart(self):
         print(f"[UI] Death restart click at {self.death_restart_click_pos}")
