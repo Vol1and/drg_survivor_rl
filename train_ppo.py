@@ -6,7 +6,7 @@ from sb3_contrib import RecurrentPPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 
 from env.drg_env import DRGEnv
-from callbacks import SimpleStatsCallback
+from callbacks import SimpleStatsCallback, AsyncStatsCallback
 
 # =========================
 # CONFIG
@@ -21,6 +21,8 @@ BEST_MODEL_DIR = os.path.join(MODEL_DIR, "best")
 LOG_DIR = "logs"
 
 stats_callback = SimpleStatsCallback()
+stats_2_callback = AsyncStatsCallback(log_freq=100)
+
 
 
 def make_env():
@@ -45,7 +47,7 @@ def main():
     # CALLBACKS
     # ----------------------------
     checkpoint_callback = CheckpointCallback(
-        save_freq=10_000,
+        save_freq=30_000,
         save_path=CHECKPOINT_DIR,
         name_prefix="drg_ppo",
     )
@@ -54,7 +56,6 @@ def main():
         eval_env,
         best_model_save_path=BEST_MODEL_DIR,
         log_path=LOG_DIR,
-        eval_freq=20_000,
         deterministic=True,
         render=False,
     )
@@ -84,7 +85,7 @@ def main():
     else:
         print('Стартуем с чекпоинта')
         model = RecurrentPPO.load(
-            "models/checkpoints/drg_ppo_80000_steps",
+            "models/checkpoints/drg_ppo_90000_steps",
             env=train_env,
             device="cuda"
         )
@@ -92,8 +93,8 @@ def main():
 
 
         model.learn(
-            total_timesteps=500_000,
-            callback=[checkpoint_callback, stats_callback],
+            total_timesteps=800_000,
+            callback=[checkpoint_callback, stats_2_callback],
             reset_num_timesteps=False,  # 🔥 ВАЖНО
             progress_bar=True,
         )

@@ -7,9 +7,6 @@ import numpy as np
 
 from env.screen import Screen
 from env.controller import step as do_step
-from env.state.color_mask import ColorMaskExtractor
-from env.state.threat_field import ThreatFromMask
-from env.state.hp_tracker import HPTracker
 from env.state.xp_tracker import XPTracker
 from env.logic.reward import RewardFunction
 from env.ui.ui_controller import UIController
@@ -18,8 +15,9 @@ from env.buffers.frame_stack import FrameStack
 from env.perception.ui_detector import UIDetector
 from multiprocessing import Queue
 from env.config import SCREEN_SIZE
-from env.state.edge_extractor import EdgeFeatureExtractor
-from env.state.level_border_mask import LevelBorderDetector
+from env.state.game_state import GameStateReader
+from env.state.hp_tracker import HPTracker
+
 
 class DRGEnv(gym.Env):
     metadata = {"render_modes": []}
@@ -31,20 +29,15 @@ class DRGEnv(gym.Env):
         self.max_steps = max_steps
         self.current_step = 0
 
+        self.game_state = GameStateReader()
+
         # ----------------------------
         # Core systems
         # ----------------------------
         self.hp_tracker = HPTracker()
         self.xp_tracker = XPTracker()
-        self.edge_detector = LevelBorderDetector()
 
-        self.edge_extractor = EdgeFeatureExtractor(
-            self.edge_detector,
-        )
         self.reward_fn = RewardFunction()
-
-        self.color_mask = ColorMaskExtractor()
-        self.threat_field = None  # init on reset
 
         self.ui_detector = UIDetector(threshold=0.7)
         self.ui_controller = UIController()
@@ -68,8 +61,7 @@ class DRGEnv(gym.Env):
                 dtype=np.uint8
             ),
             "hp": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
-            "threat": spaces.Box(low=-1.0, high=1.0, shape=(5,), dtype=np.float32),
-            "edge": spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32),
+            "edge": spaces.Box(low=-1.0, high=1.0, shape=(5,), dtype=np.float32),
         })
 
     # =====================================================
@@ -94,15 +86,12 @@ class DRGEnv(gym.Env):
         self.xp_tracker.reset()
 
         frame = self.screen.grab()
-        h, w, _ = frame.shape
 
-        self.threat_field = ThreatFromMask((h, w))
 
         obs = {
             "image": self.screen.to_gray(frame)[..., None],
             "hp": self.hp_tracker.get_current_hp(),
-            "threat": np.zeros(5, dtype=np.float32),
-            "edge": np.zeros(4, dtype=np.float32),
+            "edge": np.zeros(5, dtype=np.float32),
         }
 
         return obs, {}
@@ -128,31 +117,21 @@ class DRGEnv(gym.Env):
         # ------------------------------------------------
         reward = 0.0
         hp = np.array([0.0], dtype=np.float32)
-        threat = np.zeros(5, dtype=np.float32)
-        edge = np.zeros(4, dtype=np.float32)
+        edge = np.zeros(5, dtype=np.float32)
 
+        state = self.game_state.get()
         # ------------------------------------------------
         # 6. Perception (only during gameplay)
         # ------------------------------------------------
-        if ui_state == "gameplay":
+        if ui_state == "gameplay" and state is not None:
             self.current_step += 1
             self._apply_action(action)
-            threat_mask = self.color_mask.extract(frame)
-            threat_data = self.threat_field.update(threat_mask)
 
-            edge = self.edge_extractor.extract(frame)
 
-            threat = np.array([
-                threat_data["distance"],
-                threat_data["dx"],
-                threat_data["dy"],
-                threat_data["approaching"],
-                threat_data["confidence"],
-            ], dtype=np.float32)
-
-            hp_delta = self.hp_tracker.get_hp_delta(frame)
+            hp_delta = self.hp_tracker.get_hp_delta(float(state.get('hp', 0)))
             hp_val = self.hp_tracker.get_current_hp()
             hp = np.array([hp_val], dtype=np.float32)
+            edge = self._compute_edge_features(state)
 
             xp_delta = self.xp_tracker.get_xp_delta(frame)
 
@@ -179,9 +158,6 @@ class DRGEnv(gym.Env):
         if not np.isfinite(reward):
             reward = 0.0
 
-        if not np.all(np.isfinite(threat)):
-            threat = np.zeros(5, dtype=np.float32)
-
         # ------------------------------------------------
         # 9. Episode termination
         # ------------------------------------------------
@@ -196,9 +172,9 @@ class DRGEnv(gym.Env):
         obs = {
             "image": self.screen.to_gray(frame)[..., None],
             "hp": hp,
-            "threat": threat,
-            "edge": edge
+            "edge": edge,
         }
+
 
         info = {
             "step": self.current_step,
@@ -206,8 +182,17 @@ class DRGEnv(gym.Env):
             "reward": round(float(reward), 3),
             "hp": round(float(hp[0]), 3),
             "xp": round(self.xp_tracker.get_current_xp(), 3),
-            "edge": edge
+            "danger": edge[4],
+            "edge_ds": edge[1],
+            "levels": state.get("level", 0) if state is not None else 1,
         }
+
+        if self.current_step % 100 == 0:
+            print(state)
+            print(edge)
+
+        if edge[4] > 0:
+            print(edge)
 
         return obs, reward, done, False, info
     # =====================================================
@@ -242,3 +227,93 @@ class DRGEnv(gym.Env):
 
         elif ui_state == "chest":
             self.ui_controller.handle_chest()
+
+    def _compute_edge_features(self, state):
+        """
+        Returns:
+            np.array([
+                move_speed_norm,  # 0..1
+                edge_dist,        # 0..1
+                dir_x,            # -1..1
+                dir_z,            # -1..1
+                danger            # 0..1
+            ])
+        """
+
+        if not state or "pos" not in state:
+            return np.zeros(5, dtype=np.float32)
+
+        # -----------------------------
+        # Position (0..100)
+        # -----------------------------
+        x = float(state["pos"]["x"])
+        z = float(state["pos"]["z"])
+
+        # Movement
+        velocity_x = float(state["vel"].get("x", 0.0))
+        velocity_z = float(state["vel"].get("y", 0.0))
+
+        move_speed = float(state.get("move_speed", 0.0))
+
+        # -----------------------------
+        # Map normalization
+        # -----------------------------
+        MAP_MIN = 0.0
+        MAP_MAX = 100.0
+        MAP_RANGE = MAP_MAX - MAP_MIN
+
+        nx = np.clip((x - MAP_MIN) / MAP_RANGE, 0.0, 1.0)
+        nz = np.clip((z - MAP_MIN) / MAP_RANGE, 0.0, 1.0)
+
+        # Distance to closest border
+        edge_dist = min(nx, 1 - nx, nz, 1 - nz)
+
+        # -----------------------------
+        # Direction away from edge
+        # -----------------------------
+        grounded = bool(state.get("grounded", False))
+
+        if edge_dist > 0.01 and not grounded:
+            dx = 0.5 - nx
+            dz = 0.5 - nz
+            norm = np.sqrt(dx * dx + dz * dz) + 1e-6
+            dx /= norm
+            dz /= norm
+        else:
+            dx = 0.0
+            dz = 0.0
+
+        # -----------------------------
+        # Danger estimation
+        # -----------------------------
+        danger = 0.0
+
+        # proximity-based danger
+        if not grounded and edge_dist < 0.25:
+            approach_strength = max(
+                0.0,
+                -((dx * (0.5 - nx)) + (dz * (0.5 - nz)))
+            )
+            danger += approach_strength * (0.25 - edge_dist) * 0.6
+
+        # strong penalty if physically stuck
+        if grounded:
+            danger += 0.7
+
+        danger = np.clip(danger, 0.0, 1.0)
+
+        # -----------------------------
+        # Normalize speed (soft clamp)
+        # -----------------------------
+        MAX_SPEED = 10.0  # tweak if needed
+        move_speed_norm = np.clip(move_speed / MAX_SPEED, 0.0, 1.0)
+
+        return np.array([
+            move_speed_norm,
+            edge_dist,
+            dx,
+            dz,
+            danger
+        ], dtype=np.float32)
+
+

@@ -14,9 +14,9 @@ class RewardFunction:
         self.levelups = 0
 
         # --- edge penalty ---
-        self.edge_penalty_weight = 0.4      # сила штрафа
-        self.edge_dist_threshold = 0.35     # ближе = опасно
-        self.edge_stuck_frames = 100          # сколько кадров считать "залип"
+        self.edge_penalty_weight = 0.3     # сила штрафа
+        self.edge_dist_threshold = 0.3     # ближе = опасно
+        self.edge_stuck_frames = 50          # сколько кадров считать "залип"
         self.edge_stuck_counter = 0
 
         # --- stabilization ---
@@ -32,60 +32,64 @@ class RewardFunction:
         return self.levelup_reward
 
     def compute(
-        self,
-        *,
-        death: bool,
-        hp_fraction: float,
-        hp_delta: float,
-        xp_delta: float = 0.0,
-        edge_features=None,
+            self,
+            *,
+            death: bool,
+            hp_fraction: float,
+            hp_delta: float,
+            xp_delta: float = 0.0,
+            edge_features=None,
     ):
         reward = 0.0
 
-        # ------------------
-        # 1. HP reward
-        # ------------------
+        # -------------------------------------------------
+        # 1. HP reward (главный сигнал выживания)
+        # -------------------------------------------------
         reward += hp_fraction * self.hp_weight
         reward += hp_delta * self.hp_delta_weight
 
-        # ------------------
-        # 2. XP reward
-        # ------------------
+        # -------------------------------------------------
+        # 2. XP reward (прогресс)
+        # -------------------------------------------------
         reward += max(0.0, xp_delta) * self.xp_weight * hp_fraction
 
-        # ------------------
-        # 3. EDGE PENALTY
-        # ------------------
+        # -------------------------------------------------
+        # 3. EDGE AWARENESS (мягкий штраф)
+        # -------------------------------------------------
         if edge_features is not None:
-            edge_distance, _, _, edge_conf = edge_features
+            _, edge_dist, _, _, danger = edge_features
 
-            if edge_conf > 0.3 and edge_distance < self.edge_dist_threshold:
+            # считаем "залипание" только если реально опасно
+            if danger > 0.4 and edge_dist < self.edge_dist_threshold:
                 self.edge_stuck_counter += 1
             else:
-                self.edge_stuck_counter = 0
+                self.edge_stuck_counter = max(0, self.edge_stuck_counter - 1)
 
-            # мягкий рост штрафа
+            # нормализованный коэффициент залипания
             stuck_ratio = min(
                 self.edge_stuck_counter / self.edge_stuck_frames,
                 1.0
             )
 
+            # штраф растёт плавно
             edge_penalty = (
-                stuck_ratio *
-                edge_conf *
-                self.edge_penalty_weight
+                    stuck_ratio *
+                    danger *
+                    self.edge_penalty_weight
             )
 
             reward -= edge_penalty
 
-        # ------------------
+        # -------------------------------------------------
         # 4. Death penalty
-        # ------------------
+        # -------------------------------------------------
         if death:
             reward -= 1.0
 
-        # ------------------
-        # 5. Clamp
-        # ------------------
-        reward = max(self.min_reward, min(self.max_reward, reward))
-        return float(np.clip(reward, -1.0, 1.0))
+        # -------------------------------------------------
+        # 5. Clamp (без резких скачков)
+        # -------------------------------------------------
+        reward = np.clip(reward, self.min_reward, self.max_reward)
+
+        return float(reward)
+
