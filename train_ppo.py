@@ -6,12 +6,12 @@ from sb3_contrib import RecurrentPPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 
 from env.drg_env import DRGEnv
-from callbacks import SimpleStatsCallback, AsyncStatsCallback
+from callbacks import SimpleStatsCallback, AsyncStatsCallback, AgentStatsCallback
 
 # =========================
 # CONFIG
 # =========================
-MONITOR = 2
+MONITOR = 0
 MAX_STEPS = 2000
 TOTAL_TIMESTEPS = 500_000
 
@@ -47,7 +47,7 @@ def main():
     # CALLBACKS
     # ----------------------------
     checkpoint_callback = CheckpointCallback(
-        save_freq=30_000,
+        save_freq=15_000,
         save_path=CHECKPOINT_DIR,
         name_prefix="drg_ppo",
     )
@@ -61,7 +61,7 @@ def main():
     )
 
 
-    TRAINIG = False
+    TRAINIG = False 
 
     print("\n=== TRAINING STARTED ===\n")
     if TRAINIG:
@@ -69,8 +69,8 @@ def main():
             policy="MultiInputLstmPolicy",
             env=train_env,
             learning_rate=3e-4,
-            n_steps=256,
-            batch_size=64,
+            n_steps=384,
+            batch_size= 128,
             gamma=0.99,
             gae_lambda=0.95,
             ent_coef=0.01,
@@ -79,22 +79,26 @@ def main():
         )
         model.learn(
             total_timesteps=TOTAL_TIMESTEPS,
-            callback=[checkpoint_callback, eval_callback, stats_callback],
+            callback=[checkpoint_callback, stats_callback],
             progress_bar=True,
         )
     else:
         print('Стартуем с чекпоинта')
         model = RecurrentPPO.load(
-            "models/checkpoints/drg_ppo_90000_steps",
+            "models/checkpoints/drg_ppo_60000_steps",
             env=train_env,
             device="cuda"
         )
 
+        stats_1_callback = AgentStatsCallback(
+            log_freq=200,
+            csv_path="logs/agent_stats.csv",
+        )
 
 
         model.learn(
-            total_timesteps=800_000,
-            callback=[checkpoint_callback, stats_2_callback],
+            total_timesteps=1200_000,
+            callback=[checkpoint_callback, stats_1_callback],
             reset_num_timesteps=False,  # 🔥 ВАЖНО
             progress_bar=True,
         )

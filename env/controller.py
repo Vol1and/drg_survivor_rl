@@ -9,7 +9,7 @@ ACTIONS = {
     4: "d",
 }
 
-STEP_TIME = 0.04
+STEP_TIME = 0.12
 
 
 

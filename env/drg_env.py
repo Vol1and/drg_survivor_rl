@@ -141,6 +141,7 @@ class DRGEnv(gym.Env):
                 hp_delta=hp_delta,
                 hp_fraction=hp_val,
                 edge_features=edge,
+                position=(state['pos']['x'], state['pos']['y']),
             )
 
         # ------------------------------------------------
