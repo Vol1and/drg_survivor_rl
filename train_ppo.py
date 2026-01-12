@@ -61,7 +61,7 @@ def main():
     )
 
 
-    TRAINIG = False
+    TRAINIG = True
 
     print("\n=== TRAINING STARTED ===\n")
     if TRAINIG:
@@ -71,7 +71,7 @@ def main():
             learning_rate=3e-4,
             n_steps=384,
             batch_size= 128,
-            gamma=0.995,
+            gamma=0.99,
             gae_lambda=0.95,
             ent_coef=0.005,
             max_grad_norm=0.5,
@@ -96,7 +96,7 @@ def main():
             total_timesteps=300_000,
             callback=[checkpoint_callback, episode_stats_cb],
             reset_num_timesteps=False,  # 🔥 ВАЖНО
-            tb_log_name="continue_280k",  # 🔥 НОВЫЙ RUN
+            #tb_log_name="continue_280k",  # 🔥 НОВЫЙ RUN
             progress_bar=True,
         )
 

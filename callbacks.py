@@ -202,12 +202,15 @@ from stable_baselines3.common.callbacks import BaseCallback
 from collections import deque
 import numpy as np
 
+from stable_baselines3.common.callbacks import BaseCallback
+from collections import deque
+import numpy as np
+
+
 class EpisodeStatsCallback(BaseCallback):
     """
     Collects rich per-episode statistics based on env `info`.
-
-    Expected info keys:
-      step, ui_state, reward, hp, gold, nitra, edge_ds, levels
+    Fully compatible with new structured info keys.
     """
 
     def __init__(self, window=50, verbose=0):
@@ -218,13 +221,9 @@ class EpisodeStatsCallback(BaseCallback):
         self.steps_runs = deque(maxlen=window)
         self.reward_runs = deque(maxlen=window)
         self.reward_per_step_runs = deque(maxlen=window)
-        self.edge_mean_runs = deque(maxlen=window)
-        self.damage_runs = deque(maxlen=window)
         self.death_runs = deque(maxlen=window)
-
-        self.gold_runs = deque(maxlen=window)
-        self.nitra_runs = deque(maxlen=window)
-        self.levels_runs = deque(maxlen=window)
+        self.boss_kill_runs = deque(maxlen=window)
+        self.drop_pod_runs = deque(maxlen=window)
 
         self._reset_episode()
 
@@ -232,18 +231,18 @@ class EpisodeStatsCallback(BaseCallback):
     def _reset_episode(self):
         self.steps = 0
         self.reward_sum = 0.0
-        self.edge_sum = 0.0
-        self.edge_count = 0
-        self.damage_events = 0
 
-        self.start_gold = None
-        self.start_nitra = None
-        self.start_levels = None
+        self.damage_events = 0
+        self.low_hp_steps = 0
+        self.edge_stuck_steps = 0
+        self.threat_high_steps = 0
+
+        self.boss_seen = False
+        self.boss_killed = False
+        self.post_boss_steps = 0
+        self.reached_drop_pod = False
 
         self.last_hp = None
-        self.last_gold = None
-        self.last_nitra = None
-        self.last_levels = None
 
     # -------------------------------------------------
     def _on_step(self) -> bool:
@@ -254,34 +253,42 @@ class EpisodeStatsCallback(BaseCallback):
             if not isinstance(info, dict):
                 continue
 
-            ui_state = info.get("ui_state")
-
             # -------- Gameplay --------
-            if ui_state == "Gameplay":
-                reward = float(info.get("reward", 0.0))
-                hp = float(info.get("hp", 1.0))
-                edge_ds = float(info.get("edge_ds", 0.0))
-                gold = float(info.get("gold", 0.0))
-                nitra = float(info.get("nitra", 0.0))
-                levels = int(info.get("levels", 0))
-
-                if self.start_gold is None:
-                    self.start_gold = gold
-                    self.start_nitra = nitra
-                    self.start_levels = levels
-
-                if self.last_hp is not None and hp < self.last_hp:
-                    self.damage_events += 1
+            if info.get("state/ui") == "Gameplay":
+                reward = float(info.get("reward/total", 0.0))
+                hp = float(info.get("hp/value", 1.0))
 
                 self.steps += 1
                 self.reward_sum += reward
-                self.edge_sum += edge_ds
-                self.edge_count += 1
+
+                # --- damage ---
+                if info.get("hp/delta", 0.0) < 0:
+                    self.damage_events += 1
+
+                if info.get("hp/low", 0.0) > 0:
+                    self.low_hp_steps += 1
+
+                # --- edge / threat ---
+                if info.get("edge/stuck", 0.0) > 0:
+                    self.edge_stuck_steps += 1
+
+                if info.get("threat/high", 0.0) > 0:
+                    self.threat_high_steps += 1
+
+                # --- boss / objective ---
+                if info.get("state/is_boss", 0.0) > 0:
+                    self.boss_seen = True
+
+                if info.get("objective/boss_dead", 0.0) > 0:
+                    self.boss_killed = True
+
+                if info.get("state/is_post_boss", 0.0) > 0:
+                    self.post_boss_steps += 1
+
+                if info.get("objective/reaching_pod", 0.0) > 0:
+                    self.reached_drop_pod = True
 
                 self.last_hp = hp
-                self.last_gold = gold
-                self.last_nitra = nitra
-                self.last_levels = levels
 
             # -------- Episode finished --------
             if dones[i]:
@@ -289,53 +296,47 @@ class EpisodeStatsCallback(BaseCallback):
                     self._reset_episode()
                     continue
 
-                gold_total = max(0.0, self.last_gold - self.start_gold)
-                nitra_total = max(0.0, self.last_nitra - self.start_nitra)
-                levels_gained = max(0, self.last_levels - self.start_levels)
-
-                edge_mean = self.edge_sum / max(1, self.edge_count)
                 reward_per_step = self.reward_sum / max(1, self.steps)
-
-                done_reason = 0 if ui_state == "Death" else 1  # 0=death, 1=timeout
+                done_by_death = float(info.get("episode/ended_by_death", 0.0) > 0)
 
                 # ----- per episode -----
                 self.logger.record("episode/steps", self.steps)
                 self.logger.record("episode/reward_total", self.reward_sum)
                 self.logger.record("episode/reward_per_step", reward_per_step)
-                self.logger.record("episode/edge_distance_mean", edge_mean)
-                self.logger.record("episode/damage_events", self.damage_events)
                 self.logger.record("episode/hp_end", self.last_hp)
-                self.logger.record("episode/gold_total", gold_total)
-                self.logger.record("episode/nitra_total", nitra_total)
-                self.logger.record("episode/levels_gained", levels_gained)
-                self.logger.record("episode/done_reason", done_reason)
+
+                self.logger.record("episode/damage_events", self.damage_events)
+                self.logger.record("episode/low_hp_steps", self.low_hp_steps)
+                self.logger.record("episode/edge_stuck_steps", self.edge_stuck_steps)
+                self.logger.record("episode/threat_high_steps", self.threat_high_steps)
+
+                self.logger.record("episode/boss_seen", float(self.boss_seen))
+                self.logger.record("episode/boss_killed", float(self.boss_killed))
+                self.logger.record("episode/post_boss_steps", self.post_boss_steps)
+                self.logger.record("episode/reached_drop_pod", float(self.reached_drop_pod))
+
+                self.logger.record("episode/done_by_death", done_by_death)
 
                 # ----- rolling -----
                 self.steps_runs.append(self.steps)
                 self.reward_runs.append(self.reward_sum)
                 self.reward_per_step_runs.append(reward_per_step)
-                self.edge_mean_runs.append(edge_mean)
-                self.damage_runs.append(self.damage_events)
-                self.death_runs.append(1 if done_reason == 0 else 0)
-
-                self.gold_runs.append(gold_total)
-                self.nitra_runs.append(nitra_total)
-                self.levels_runs.append(levels_gained)
+                self.death_runs.append(done_by_death)
+                self.boss_kill_runs.append(float(self.boss_killed))
+                self.drop_pod_runs.append(float(self.reached_drop_pod))
 
                 self.logger.record("rolling/steps_mean", np.mean(self.steps_runs))
                 self.logger.record("rolling/reward_mean", np.mean(self.reward_runs))
                 self.logger.record("rolling/reward_per_step_mean", np.mean(self.reward_per_step_runs))
-                self.logger.record("rolling/edge_distance_mean", np.mean(self.edge_mean_runs))
-                self.logger.record("rolling/damage_events_mean", np.mean(self.damage_runs))
                 self.logger.record("rolling/death_ratio", np.mean(self.death_runs))
-                self.logger.record("rolling/gold_mean", np.mean(self.gold_runs))
-                self.logger.record("rolling/nitra_mean", np.mean(self.nitra_runs))
-                self.logger.record("rolling/levels_mean", np.mean(self.levels_runs))
+                self.logger.record("rolling/boss_kill_ratio", np.mean(self.boss_kill_runs))
+                self.logger.record("rolling/drop_pod_success_ratio", np.mean(self.drop_pod_runs))
 
                 self.logger.dump(self.num_timesteps)
                 self._reset_episode()
 
         return True
+
 
 
 

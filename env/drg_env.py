@@ -197,16 +197,21 @@ class DRGEnv(gym.Env):
 
             }
 
-            self.info = {
-                "step": self.current_step,
-                "ui_state": self.ui_state,
-                "reward": round(float(reward), 3),
-                "hp": round(float(hp[0]), 3),
-                "nitra": self.nitra_tracker.prev_nitra,
-                "gold": self.gold_tracker.prev_gold,
-                "edge_ds": edge[1],
-                "level": self.level_tracker.prev_level,
-            }
+            self.info = self._build_info(
+                reward=reward,
+                hp_val=hp_val,
+                hp_delta=hp_delta,
+                edge=edge,
+                is_mining=is_mining,
+                is_grounded=is_grounded,
+                is_boss=is_boss,
+                is_boss_dead=is_boss_dead,
+                nearest_enemy_distance=nearest_enemy_distance,
+                average_enemy_distance=average_enemy_distance,
+                enemies_in_radius=enemies_in_radius,
+                has_drop_pod=has_drop_pod,
+                drop_pod_distance=drop_pod_distance,
+            )
 
         done = (
                 self.ui_state == "Death"
@@ -321,3 +326,72 @@ class DRGEnv(gym.Env):
             dx,
             dz,
         ], dtype=np.float32)
+    def _build_info(
+        self,
+        *,
+        reward,
+        hp_val,
+        hp_delta,
+        edge,
+        is_mining,
+        is_grounded,
+        is_boss,
+        is_boss_dead,
+        nearest_enemy_distance,
+        average_enemy_distance,
+        enemies_in_radius,
+        has_drop_pod,
+        drop_pod_distance,
+    ):
+        info = {
+            # --- episode ---
+            "episode/step": self.current_step,
+            "episode/ended_by_death": float(self.ui_state == "Death"),
+            "episode/ended_by_timeout": float(self.current_step >= self.max_steps),
+
+            # --- reward ---
+            "reward/total": reward,
+            "reward/survival": self.reward_fn.survival_reward,
+            "reward/damage": hp_delta * self.reward_fn.damage_multiplier if hp_delta < 0 else 0.0,
+            "reward/resource": (
+                self.reward_fn.gold_weight * self.gold_tracker.last_delta +
+                self.reward_fn.nitra_weight * self.nitra_tracker.last_delta
+            ),
+            "reward/level": self.level_tracker.last_delta * self.reward_fn.levelup_reward,
+            "reward/boss_damage": -self.boss_hp_tracker.last_delta if self.boss_hp_tracker.last_delta < 0 else 0.0,
+            "reward/boss_spawn": float(is_boss and not self.reward_fn.is_boss_spawn_reward_acquired),
+            "reward/boss_death": float(is_boss_dead),
+            "reward/edge": self.reward_fn._edge_penalty(edge),
+            "reward/position": self.reward_fn._position_penalty((0.5, 0.5)),  # approx center penalty
+
+            # --- hp ---
+            "hp/value": hp_val,
+            "hp/delta": hp_delta,
+            "hp/low": float(hp_val < 0.3),
+
+            # --- threat ---
+            "threat/nearest": nearest_enemy_distance,
+            "threat/average": average_enemy_distance,
+            "threat/density": enemies_in_radius,
+            "threat/high": float(nearest_enemy_distance < 0.2 and enemies_in_radius > 0.5),
+
+            # --- objective ---
+            "objective/has_drop_pod": has_drop_pod,
+            "objective/drop_pod_distance": drop_pod_distance,
+            "objective/boss_dead": float(is_boss_dead),
+            "objective/reaching_pod": float(has_drop_pod and drop_pod_distance < 0.3),
+
+            # --- edge ---
+            "edge/distance": edge[1],
+            "edge/stuck": float(edge[1] < 0.1),
+            "edge/move_speed": edge[0],
+
+            # --- state ---
+            "state/is_mining": float(is_mining),
+            "state/is_grounded": float(is_grounded),
+            "state/is_boss": float(is_boss),
+            "state/is_post_boss": float(is_boss_dead),
+            "state/ui": self.ui_state,
+        }
+
+        return info
