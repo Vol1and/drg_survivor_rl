@@ -24,3 +24,10 @@ class Screen:
     def to_hsv(frame):
         """HSV представление"""
         return cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    def process_for_obs(self, frame):
+        gray = self.to_gray(frame)  # (H, W)
+        hsv = self.to_hsv(frame)
+        h = hsv[:, :, 0]  # Hue channel
+
+        return np.stack([gray, h], axis=-1)

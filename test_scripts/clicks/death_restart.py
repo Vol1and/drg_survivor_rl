@@ -7,10 +7,10 @@ def main():
 
     print("⚠️ Наведи игру на экран смерти.")
     print("Клик произойдёт через 3 секунды...")
-    time.sleep(3)
+    time.sleep(1)
 
     print("➡️ Нажимаю кнопку смерти")
-    ui.handle_death_restart()
+    ui.handle_shop()
 
     print("✅ Клик отправлен")
 

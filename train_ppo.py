@@ -6,13 +6,13 @@ from sb3_contrib import RecurrentPPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 
 from env.drg_env import DRGEnv
-from callbacks import SimpleStatsCallback, AsyncStatsCallback, AgentStatsCallback
+from callbacks import SimpleStatsCallback, AsyncStatsCallback, AgentStatsCallback, EpisodeStatsCallback
 
 # =========================
 # CONFIG
 # =========================
-MONITOR = 0
-MAX_STEPS = 2000
+MONITOR = 2
+MAX_STEPS = 50_000
 TOTAL_TIMESTEPS = 500_000
 
 MODEL_DIR = "models"
@@ -23,7 +23,7 @@ LOG_DIR = "logs"
 stats_callback = SimpleStatsCallback()
 stats_2_callback = AsyncStatsCallback(log_freq=100)
 
-
+episode_stats_cb = EpisodeStatsCallback(window=100)
 
 def make_env():
     return DRGEnv(
@@ -47,7 +47,7 @@ def main():
     # CALLBACKS
     # ----------------------------
     checkpoint_callback = CheckpointCallback(
-        save_freq=15_000,
+        save_freq=10_000,
         save_path=CHECKPOINT_DIR,
         name_prefix="drg_ppo",
     )
@@ -61,7 +61,7 @@ def main():
     )
 
 
-    TRAINIG = False 
+    TRAINIG = False
 
     print("\n=== TRAINING STARTED ===\n")
     if TRAINIG:
@@ -71,35 +71,32 @@ def main():
             learning_rate=3e-4,
             n_steps=384,
             batch_size= 128,
-            gamma=0.99,
+            gamma=0.995,
             gae_lambda=0.95,
-            ent_coef=0.01,
+            ent_coef=0.005,
             max_grad_norm=0.5,
             verbose=1,
+            tensorboard_log="logs",
         )
         model.learn(
             total_timesteps=TOTAL_TIMESTEPS,
-            callback=[checkpoint_callback, stats_callback],
+            callback=[checkpoint_callback, episode_stats_cb],
             progress_bar=True,
         )
     else:
         print('Стартуем с чекпоинта')
         model = RecurrentPPO.load(
-            "models/checkpoints/drg_ppo_60000_steps",
+            "models/checkpoints/drg_ppo_640000_steps",
             env=train_env,
-            device="cuda"
+            device="cuda",
+            tensorboard_log="logs",
         )
-
-        stats_1_callback = AgentStatsCallback(
-            log_freq=200,
-            csv_path="logs/agent_stats.csv",
-        )
-
 
         model.learn(
-            total_timesteps=1200_000,
-            callback=[checkpoint_callback, stats_1_callback],
+            total_timesteps=300_000,
+            callback=[checkpoint_callback, episode_stats_cb],
             reset_num_timesteps=False,  # 🔥 ВАЖНО
+            tb_log_name="continue_280k",  # 🔥 НОВЫЙ RUN
             progress_bar=True,
         )
 

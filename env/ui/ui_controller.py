@@ -4,16 +4,17 @@ import pydirectinput
 
 class UIController:
     def __init__(self):
-        self.levelup_click_pos = (836, 525)
-        self.overclock_click_pos = (836, 525)
-        self.death_restart_click_pos = (950, 1435)
-        self.continue_button_pos = (1150, 1345)
+        self.levelup_click_pos = (836, 555)
+        self.overclock_click_pos = (836, 555)
+        self.death_restart_click_pos = (950, 1465)
+        self.continue_button_pos = (1150, 1375)
+        self.shop_button_pos = (1450, 825)
 
         # Настройки pydirectinput
         pydirectinput.PAUSE = 0
         pydirectinput.FAILSAFE = False
 
-        self.click_delay = 0.05  # безопасная задержка
+        self.click_delay = 0.1  # безопасная задержка
 
     def _click(self, x, y):
         """
@@ -26,7 +27,7 @@ class UIController:
     def handle_levelup(self):
         print(f"[UI] Levelup click at {self.levelup_click_pos}")
         self._click(*self.levelup_click_pos)
-        time.sleep(1)
+        time.sleep(0.3)
 
     def handle_continue_button(self):
         print(f"[UI] Continue click at {self.continue_button_pos}")
@@ -45,4 +46,9 @@ class UIController:
     def handle_death_restart(self):
         print(f"[UI] Death restart click at {self.death_restart_click_pos}")
         self._click(*self.death_restart_click_pos)
+        time.sleep(4)
+
+    def handle_shop(self):
+        print(f"[UI] Shop click at {self.shop_button_pos}")
+        self._click(*self.shop_button_pos)
         time.sleep(4)
