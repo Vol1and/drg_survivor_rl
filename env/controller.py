@@ -1,7 +1,7 @@
 import time
 import pydirectinput as pdi
 
-GAME_SPEED = 2.5
+GAME_SPEED = 3.5
 
 class MovementController:
     """

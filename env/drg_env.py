@@ -6,17 +6,13 @@ from gymnasium import spaces
 import numpy as np
 
 from env.screen import Screen
-from env.state.xp_tracker import XPTracker
 from env.logic.reward import RewardFunction
 from env.ui.ui_controller import UIController
 from env.config import SCREEN_SIZE
 from env.state.game_state import GameStateReader
-from env.state.hp_tracker import HPTracker
-from env.state.nitra_tracker import NitraTracker
-from env.state.gold_tracker import GoldTracker
+from env.state.linear_tracker import LinearTracker
+from env.state.fraction_tracker import FractionTracker
 from env.controller import MovementController
-from env.state.level_tracker import LevelTracker
-from env.state.boss_tracker import BossHPTracker
 
 
 class DRGEnv(gym.Env):
@@ -37,12 +33,12 @@ class DRGEnv(gym.Env):
         # ----------------------------
         # Core systems
         # ----------------------------
-        self.hp_tracker = HPTracker()
-        self.xp_tracker = XPTracker()
-        self.gold_tracker = GoldTracker()
-        self.nitra_tracker = NitraTracker()
-        self.level_tracker = LevelTracker()
-        self.boss_hp_tracker = BossHPTracker()
+        self.hp_tracker = FractionTracker()
+        self.boss_hp_tracker = FractionTracker()
+
+        self.gold_tracker = LinearTracker()
+        self.nitra_tracker = LinearTracker()
+        self.level_tracker = LinearTracker()
 
         self.reward_fn = RewardFunction()
 
@@ -58,7 +54,7 @@ class DRGEnv(gym.Env):
             "image": spaces.Box(
                 low=0,
                 high=255,
-                shape=(SCREEN_SIZE, SCREEN_SIZE, 2),
+                shape=(SCREEN_SIZE, SCREEN_SIZE, 1),
                 dtype=np.uint8
             ),
             "hp": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
@@ -72,7 +68,7 @@ class DRGEnv(gym.Env):
             "threat": spaces.Box(
                 low=0.0,
                 high=1.0,
-                shape=(3,),
+                shape=(4,),
                 dtype=np.float32
             ),
             "objective": spaces.Box(
@@ -94,7 +90,6 @@ class DRGEnv(gym.Env):
         self.reward_fn.reset()
 
         self.hp_tracker.reset()
-        self.xp_tracker.reset()
         self.gold_tracker.reset()
         self.nitra_tracker.reset()
         self.level_tracker.reset()
@@ -104,10 +99,10 @@ class DRGEnv(gym.Env):
 
         self.obs = {
             "image": self.screen.process_for_obs(self.frame),
-            "hp": self.hp_tracker.get_current_hp(),
+            "hp": self.hp_tracker.get_current(),
             "edge": np.zeros(4, dtype=np.float32),
             "flags": np.zeros(2, dtype=np.float32),
-            "threat": np.zeros(3, dtype=np.float32),
+            "threat": np.zeros(4, dtype=np.float32),
             "objective": np.zeros(3, dtype=np.float32),
         }
 
@@ -120,13 +115,10 @@ class DRGEnv(gym.Env):
 
         reward = 0.0
 
-        prev_ui = self.ui_state
         new_ui_state = self.extract_ui_from_state()
 
         if new_ui_state is not None:
             self.ui_state = new_ui_state
-            if self.ui_state == "Loading" and prev_ui == "Gameplay":
-                self.ui_state = "Death"
 
         self.manage_ui(self.ui_state)
 
@@ -152,24 +144,28 @@ class DRGEnv(gym.Env):
              pos_z,
              move_speed,
              is_boss,
-             is_boss_dead
+             is_boss_dead,
+             boss_distance
              ) = self.extract_info_from_state()
 
-            level_delta = self.level_tracker.get_level_delta(level)
-            nitra_delta = self.nitra_tracker.get_nitra_delta(nitra)
-            gold_delta = self.gold_tracker.get_gold_delta(gold)
+            level_delta = self.level_tracker.get_delta(level)
+            nitra_delta = self.nitra_tracker.get_delta(nitra)
+            gold_delta = self.gold_tracker.get_delta(gold)
 
-            hp_delta = self.hp_tracker.get_hp_delta(hp)
+            hp_delta = self.hp_tracker.get_delta(hp)
             boss_hp_delta = self.boss_hp_tracker.get_delta(boss_hp)
-            hp_val = self.hp_tracker.get_current_hp()
+            hp_val = self.hp_tracker.get_current()
 
             hp = np.array([hp_val], dtype=np.float32)
+
             edge = self._compute_edge_features(pos_x, pos_z, move_speed)
 
-            xp_delta = self.xp_tracker.get_xp_delta(self.screen.to_hsv(self.frame))
+            threat = np.array([nearest_enemy_distance, average_enemy_distance, enemies_in_radius, boss_distance],
+                                   dtype=np.float32)
+            objective = np.array([has_drop_pod, drop_pod_distance,1.0 if is_boss_dead else 0.0],
+                                      dtype=np.float32)
 
             reward = self.reward_fn.compute(
-                xp_delta=xp_delta,
                 hp_delta=hp_delta,
                 level_delta=level_delta,
                 nitra_delta=nitra_delta,
@@ -180,6 +176,8 @@ class DRGEnv(gym.Env):
                 edge_features=edge,
                 hp_fraction=hp_val,
                 position=(pos_x, pos_z),
+                threat=threat,
+                objective=objective,
             )
 
             if not np.isfinite(reward):
@@ -190,10 +188,8 @@ class DRGEnv(gym.Env):
                 "hp": hp,
                 "edge": edge,
                 "flags": np.array([1.0 if is_mining else 0.0, 1.0 if is_grounded else 0.0], dtype=np.float32),
-                "threat": np.array([nearest_enemy_distance, average_enemy_distance, enemies_in_radius],
-                                   dtype=np.float32),
-                "objective": np.array([has_drop_pod, drop_pod_distance,1.0 if is_boss_dead else 0.0],
-                                      dtype=np.float32)
+                "threat": threat,
+                "objective": objective,
 
             }
 
@@ -214,7 +210,7 @@ class DRGEnv(gym.Env):
             )
 
         done = (
-                self.ui_state == "Death"
+                (self.ui_state == "Death" and self.current_step >= 10)
                 or self.current_step >= self.max_steps
         )
 
@@ -247,7 +243,7 @@ class DRGEnv(gym.Env):
         average_enemy_distance = np.clip(state['average_enemy_distance'] / 30.0, 0.0, 1.0)
         enemies_in_radius = np.clip(state['enemies_in_radius'] / 20.0, 0.0, 1.0)
         has_drop_pod = 1.0 if state['has_drop_pod'] else 0.0
-        drop_pod_distance = state['drop_pod_distance'] / 100.0
+        drop_pod_distance = np.clip(state['drop_pod_distance'] / 100.0, 0.0, 1.0)
         level = float(state.get('level', 0))
         nitra = float(state.get('nitra', 0))
         gold = float(state.get('gold', 0))
@@ -258,6 +254,7 @@ class DRGEnv(gym.Env):
         is_boss = bool(state.get("is_boss", False))
         is_boss_dead = bool(state.get("is_boss_dead", False))
         move_speed = np.clip(float(state.get("move_speed", 0.0)) / 10.0, 0.0, 1.0)
+        boss_distance = np.clip(state['boss_distance'] / 30.0, 0.0, 1.0)
 
         return (is_mining,
                 is_grounded,
@@ -275,7 +272,8 @@ class DRGEnv(gym.Env):
                 pos_z,
                 move_speed,
                 is_boss,
-                is_boss_dead
+                is_boss_dead,
+                boss_distance
                 )
 
     def extract_ui_from_state(self):
@@ -351,7 +349,6 @@ class DRGEnv(gym.Env):
 
             # --- reward ---
             "reward/total": reward,
-            "reward/survival": self.reward_fn.survival_reward,
             "reward/damage": hp_delta * self.reward_fn.damage_multiplier if hp_delta < 0 else 0.0,
             "reward/resource": (
                 self.reward_fn.gold_weight * self.gold_tracker.last_delta +

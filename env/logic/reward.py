@@ -12,14 +12,14 @@ class RewardFunction:
         # ==================================================
         # SURVIVAL / DAMAGE
         # ==================================================
-        self.base_survival_reward = 0.07
-        self.damage_multiplier = 10.0
+        self.base_survival_reward = 0.04
+        self.damage_multiplier = 6.0
         self.death_penalty = 5.0
 
         # ==================================================
         # PROGRESSION
         # ==================================================
-        self.levelup_reward = 0.3
+        self.levelup_reward = 0.2
 
         # ==================================================
         # BOSS LOGIC
@@ -34,14 +34,14 @@ class RewardFunction:
         # ==================================================
         # RESOURCES
         # ==================================================
-        self.gold_weight = 0.12
-        self.nitra_weight = 0.12
+        self.gold_weight = 0.15
+        self.nitra_weight = 0.15
 
         # ==================================================
         # EDGE / POSITION
         # ==================================================
-        self.edge_penalty_weight = -0.07
-        self.edge_dist_threshold = 0.25
+        self.edge_penalty_weight = -0.15
+        self.edge_dist_threshold = 0.20
         self.edge_stuck_frames = 30
         self.edge_stuck_counter = 0
 
@@ -127,7 +127,7 @@ class RewardFunction:
         if threat is None:
             return self.base_survival_reward
 
-        _, avg_dist, density = threat
+        _, avg_dist, density, _ = threat
         danger = (1.0 - avg_dist) * density
         return self.base_survival_reward * (1.0 - 0.5 * danger)
 
@@ -166,7 +166,7 @@ class RewardFunction:
         return reward
 
     def _threat_penalty(self, threat, hp_fraction):
-        nearest_dist, _, density = threat
+        nearest_dist, _, density, _ = threat
 
         # higher penalty when low HP
         hp_scale = 1.0 + (1.0 - hp_fraction)
@@ -207,7 +207,7 @@ class RewardFunction:
                 return t * t
             return 0.0
 
-        return -np.clip(max(axis_penalty(nx), axis_penalty(nz)), 0.0, 1.0)
+        return -np.clip(max(axis_penalty(nx), axis_penalty(nz)) * 0.3, 0.0, 1.0)
 
     # ==================================================
     # TERMINAL

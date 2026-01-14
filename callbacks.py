@@ -198,19 +198,12 @@ class AgentStatsCallback(BaseCallback):
         if self.csv_file:
             self.csv_file.close()
 
-from stable_baselines3.common.callbacks import BaseCallback
 from collections import deque
-import numpy as np
-
-from stable_baselines3.common.callbacks import BaseCallback
-from collections import deque
-import numpy as np
-
 
 class EpisodeStatsCallback(BaseCallback):
     """
-    Collects rich per-episode statistics based on env `info`.
-    Fully compatible with new structured info keys.
+    Collects rich per-episode statistics based on structured env `info`.
+    Fully compatible with new hierarchical info keys.
     """
 
     def __init__(self, window=50, verbose=0):
@@ -221,6 +214,7 @@ class EpisodeStatsCallback(BaseCallback):
         self.steps_runs = deque(maxlen=window)
         self.reward_runs = deque(maxlen=window)
         self.reward_per_step_runs = deque(maxlen=window)
+
         self.death_runs = deque(maxlen=window)
         self.boss_kill_runs = deque(maxlen=window)
         self.drop_pod_runs = deque(maxlen=window)
@@ -229,14 +223,29 @@ class EpisodeStatsCallback(BaseCallback):
 
     # -------------------------------------------------
     def _reset_episode(self):
+        # --- core ---
         self.steps = 0
         self.reward_sum = 0.0
 
+        # --- reward decomposition ---
+        self.reward_damage = 0.0
+        self.reward_resource = 0.0
+        self.reward_level = 0.0
+        self.reward_boss_damage = 0.0
+        self.reward_edge = 0.0
+        self.reward_position = 0.0
+
+        # --- hp / risk ---
         self.damage_events = 0
         self.low_hp_steps = 0
+
+        # --- spatial ---
         self.edge_stuck_steps = 0
+
+        # --- threat ---
         self.threat_high_steps = 0
 
+        # --- objectives ---
         self.boss_seen = False
         self.boss_killed = False
         self.post_boss_steps = 0
@@ -253,25 +262,34 @@ class EpisodeStatsCallback(BaseCallback):
             if not isinstance(info, dict):
                 continue
 
-            # -------- Gameplay --------
             if info.get("state/ui") == "Gameplay":
-                reward = float(info.get("reward/total", 0.0))
-                hp = float(info.get("hp/value", 1.0))
-
                 self.steps += 1
-                self.reward_sum += reward
 
-                # --- damage ---
+                # --- total reward ---
+                r = float(info.get("reward/total", 0.0))
+                self.reward_sum += r
+
+                # --- reward components ---
+                self.reward_damage += float(info.get("reward/damage", 0.0))
+                self.reward_resource += float(info.get("reward/resource", 0.0))
+                self.reward_level += float(info.get("reward/level", 0.0))
+                self.reward_boss_damage += float(info.get("reward/boss_damage", 0.0))
+                self.reward_edge += float(info.get("reward/edge", 0.0))
+                self.reward_position += float(info.get("reward/position", 0.0))
+
+                # --- hp ---
+                hp = float(info.get("hp/value", 1.0))
                 if info.get("hp/delta", 0.0) < 0:
                     self.damage_events += 1
-
                 if info.get("hp/low", 0.0) > 0:
                     self.low_hp_steps += 1
+                self.last_hp = hp
 
-                # --- edge / threat ---
+                # --- edge ---
                 if info.get("edge/stuck", 0.0) > 0:
                     self.edge_stuck_steps += 1
 
+                # --- threat ---
                 if info.get("threat/high", 0.0) > 0:
                     self.threat_high_steps += 1
 
@@ -288,8 +306,6 @@ class EpisodeStatsCallback(BaseCallback):
                 if info.get("objective/reaching_pod", 0.0) > 0:
                     self.reached_drop_pod = True
 
-                self.last_hp = hp
-
             # -------- Episode finished --------
             if dones[i]:
                 if self.steps == 0:
@@ -299,11 +315,17 @@ class EpisodeStatsCallback(BaseCallback):
                 reward_per_step = self.reward_sum / max(1, self.steps)
                 done_by_death = float(info.get("episode/ended_by_death", 0.0) > 0)
 
-                # ----- per episode -----
+                # ===== episode =====
                 self.logger.record("episode/steps", self.steps)
                 self.logger.record("episode/reward_total", self.reward_sum)
                 self.logger.record("episode/reward_per_step", reward_per_step)
-                self.logger.record("episode/hp_end", self.last_hp)
+
+                self.logger.record("episode/reward_damage", self.reward_damage)
+                self.logger.record("episode/reward_resource", self.reward_resource)
+                self.logger.record("episode/reward_level", self.reward_level)
+                self.logger.record("episode/reward_boss_damage", self.reward_boss_damage)
+                self.logger.record("episode/reward_edge", self.reward_edge)
+                self.logger.record("episode/reward_position", self.reward_position)
 
                 self.logger.record("episode/damage_events", self.damage_events)
                 self.logger.record("episode/low_hp_steps", self.low_hp_steps)
@@ -316,8 +338,9 @@ class EpisodeStatsCallback(BaseCallback):
                 self.logger.record("episode/reached_drop_pod", float(self.reached_drop_pod))
 
                 self.logger.record("episode/done_by_death", done_by_death)
+                self.logger.record("episode/hp_end", self.last_hp)
 
-                # ----- rolling -----
+                # ===== rolling =====
                 self.steps_runs.append(self.steps)
                 self.reward_runs.append(self.reward_sum)
                 self.reward_per_step_runs.append(reward_per_step)

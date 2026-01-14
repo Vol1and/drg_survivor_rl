@@ -23,7 +23,7 @@ LOG_DIR = "logs"
 stats_callback = SimpleStatsCallback()
 stats_2_callback = AsyncStatsCallback(log_freq=100)
 
-episode_stats_cb = EpisodeStatsCallback(window=100)
+episode_stats_cb = EpisodeStatsCallback(window=50)
 
 def make_env():
     return DRGEnv(
@@ -52,16 +52,16 @@ def main():
         name_prefix="drg_ppo",
     )
 
-    eval_callback = EvalCallback(
-        eval_env,
-        best_model_save_path=BEST_MODEL_DIR,
-        log_path=LOG_DIR,
-        deterministic=True,
-        render=False,
-    )
+    # eval_callback = EvalCallback(
+    #     eval_env,
+    #     best_model_save_path=BEST_MODEL_DIR,
+    #     log_path=LOG_DIR,
+    #     deterministic=True,
+    #     render=False,
+    # )
 
 
-    TRAINIG = True
+    TRAINIG = False
 
     print("\n=== TRAINING STARTED ===\n")
     if TRAINIG:
@@ -86,14 +86,15 @@ def main():
     else:
         print('Стартуем с чекпоинта')
         model = RecurrentPPO.load(
-            "models/checkpoints/drg_ppo_640000_steps",
+            "models/checkpoints/drg_ppo_350000_steps",
             env=train_env,
             device="cuda",
             tensorboard_log="logs",
+
         )
 
         model.learn(
-            total_timesteps=300_000,
+            total_timesteps=150_000,
             callback=[checkpoint_callback, episode_stats_cb],
             reset_num_timesteps=False,  # 🔥 ВАЖНО
             #tb_log_name="continue_280k",  # 🔥 НОВЫЙ RUN
@@ -101,6 +102,7 @@ def main():
         )
 
     model.save(os.path.join(MODEL_DIR, "final_model"))
+
 
 print("\n=== TRAINING FINISHED ===\n")
 
