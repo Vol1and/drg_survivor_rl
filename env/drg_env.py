@@ -77,6 +77,12 @@ class DRGEnv(gym.Env):
                 shape=(3,),
                 dtype=np.float32
             ),
+            "minimap": spaces.Box(
+                low=0.0,
+                high=1.0,
+                shape=(32, 32),
+                dtype=np.float32
+            )
         })
 
     # =====================================================
@@ -104,6 +110,7 @@ class DRGEnv(gym.Env):
             "flags": np.zeros(2, dtype=np.float32),
             "threat": np.zeros(4, dtype=np.float32),
             "objective": np.zeros(3, dtype=np.float32),
+            "minimap": np.zeros((32, 32), dtype=np.float32),
         }
 
         return self.obs, {}
@@ -145,7 +152,8 @@ class DRGEnv(gym.Env):
              move_speed,
              is_boss,
              is_boss_dead,
-             boss_distance
+             boss_distance,
+             minimap
              ) = self.extract_info_from_state()
 
             level_delta = self.level_tracker.get_delta(level)
@@ -190,6 +198,7 @@ class DRGEnv(gym.Env):
                 "flags": np.array([1.0 if is_mining else 0.0, 1.0 if is_grounded else 0.0], dtype=np.float32),
                 "threat": threat,
                 "objective": objective,
+                "minimap": minimap
 
             }
 
@@ -207,6 +216,7 @@ class DRGEnv(gym.Env):
                 enemies_in_radius=enemies_in_radius,
                 has_drop_pod=has_drop_pod,
                 drop_pod_distance=drop_pod_distance,
+                minimap=minimap
             )
 
         done = (
@@ -256,6 +266,15 @@ class DRGEnv(gym.Env):
         move_speed = np.clip(float(state.get("move_speed", 0.0)) / 10.0, 0.0, 1.0)
         boss_distance = np.clip(state['boss_distance'] / 30.0, 0.0, 1.0)
 
+        raw_mm = state.get("minimap_icon")
+        w = state.get("minimap_w")
+        h = state.get("minimap_h")
+
+        if raw_mm is not None:
+            minimap = self.screen.process_minimap(raw_mm, w, h)
+        else:
+            minimap = np.zeros((32, 32), dtype=np.float32)
+
         return (is_mining,
                 is_grounded,
                 nearest_enemy_distance,
@@ -273,7 +292,8 @@ class DRGEnv(gym.Env):
                 move_speed,
                 is_boss,
                 is_boss_dead,
-                boss_distance
+                boss_distance,
+                minimap
                 )
 
     def extract_ui_from_state(self):
@@ -340,6 +360,7 @@ class DRGEnv(gym.Env):
         enemies_in_radius,
         has_drop_pod,
         drop_pod_distance,
+            minimap
     ):
         info = {
             # --- episode ---
@@ -365,6 +386,12 @@ class DRGEnv(gym.Env):
             "hp/value": hp_val,
             "hp/delta": hp_delta,
             "hp/low": float(hp_val < 0.3),
+
+            "minimap/mean": float(np.mean(minimap)),
+            "minimap/std": float(np.std(minimap)),
+            "minimap/min": float(np.min(minimap)),
+            "minimap/max": float(np.max(minimap)),
+            "minimap/nonzero_ratio": float(np.count_nonzero(minimap) / minimap.size),
 
             # --- threat ---
             "threat/nearest": nearest_enemy_distance,

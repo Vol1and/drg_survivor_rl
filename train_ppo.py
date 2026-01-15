@@ -86,7 +86,7 @@ def main():
     else:
         print('Стартуем с чекпоинта')
         model = RecurrentPPO.load(
-            "models/checkpoints/drg_ppo_350000_steps",
+            "models/checkpoints/drg_ppo_50000_steps",
             env=train_env,
             device="cuda",
             tensorboard_log="logs",
@@ -94,7 +94,7 @@ def main():
         )
 
         model.learn(
-            total_timesteps=150_000,
+            total_timesteps=400_000,
             callback=[checkpoint_callback, episode_stats_cb],
             reset_num_timesteps=False,  # 🔥 ВАЖНО
             #tb_log_name="continue_280k",  # 🔥 НОВЫЙ RUN

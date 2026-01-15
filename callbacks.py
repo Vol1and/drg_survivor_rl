@@ -200,10 +200,15 @@ class AgentStatsCallback(BaseCallback):
 
 from collections import deque
 
+from collections import deque
+import numpy as np
+from stable_baselines3.common.callbacks import BaseCallback
+
+
 class EpisodeStatsCallback(BaseCallback):
     """
-    Collects rich per-episode statistics based on structured env `info`.
-    Fully compatible with new hierarchical info keys.
+    Collects rich per-episode statistics based on structured env `info`,
+    including minimap diagnostics.
     """
 
     def __init__(self, window=50, verbose=0):
@@ -218,6 +223,11 @@ class EpisodeStatsCallback(BaseCallback):
         self.death_runs = deque(maxlen=window)
         self.boss_kill_runs = deque(maxlen=window)
         self.drop_pod_runs = deque(maxlen=window)
+
+        # minimap rolling
+        self.minimap_mean_runs = deque(maxlen=window)
+        self.minimap_std_runs = deque(maxlen=window)
+        self.minimap_nonzero_runs = deque(maxlen=window)
 
         self._reset_episode()
 
@@ -251,6 +261,12 @@ class EpisodeStatsCallback(BaseCallback):
         self.post_boss_steps = 0
         self.reached_drop_pod = False
 
+        # --- minimap ---
+        self.minimap_mean_sum = 0.0
+        self.minimap_std_sum = 0.0
+        self.minimap_nonzero_steps = 0
+        self.minimap_empty_steps = 0
+
         self.last_hp = None
 
     # -------------------------------------------------
@@ -265,11 +281,10 @@ class EpisodeStatsCallback(BaseCallback):
             if info.get("state/ui") == "Gameplay":
                 self.steps += 1
 
-                # --- total reward ---
+                # --- reward ---
                 r = float(info.get("reward/total", 0.0))
                 self.reward_sum += r
 
-                # --- reward components ---
                 self.reward_damage += float(info.get("reward/damage", 0.0))
                 self.reward_resource += float(info.get("reward/resource", 0.0))
                 self.reward_level += float(info.get("reward/level", 0.0))
@@ -285,26 +300,34 @@ class EpisodeStatsCallback(BaseCallback):
                     self.low_hp_steps += 1
                 self.last_hp = hp
 
-                # --- edge ---
+                # --- edge / threat ---
                 if info.get("edge/stuck", 0.0) > 0:
                     self.edge_stuck_steps += 1
-
-                # --- threat ---
                 if info.get("threat/high", 0.0) > 0:
                     self.threat_high_steps += 1
 
-                # --- boss / objective ---
+                # --- objectives ---
                 if info.get("state/is_boss", 0.0) > 0:
                     self.boss_seen = True
-
                 if info.get("objective/boss_dead", 0.0) > 0:
                     self.boss_killed = True
-
                 if info.get("state/is_post_boss", 0.0) > 0:
                     self.post_boss_steps += 1
-
                 if info.get("objective/reaching_pod", 0.0) > 0:
                     self.reached_drop_pod = True
+
+                # --- minimap ---
+                mm_mean = float(info.get("minimap/mean", 0.0))
+                mm_std = float(info.get("minimap/std", 0.0))
+                mm_nonzero = float(info.get("minimap/nonzero_ratio", 0.0))
+
+                self.minimap_mean_sum += mm_mean
+                self.minimap_std_sum += mm_std
+
+                if mm_nonzero < 0.05:
+                    self.minimap_empty_steps += 1
+                else:
+                    self.minimap_nonzero_steps += 1
 
             # -------- Episode finished --------
             if dones[i]:
@@ -315,28 +338,23 @@ class EpisodeStatsCallback(BaseCallback):
                 reward_per_step = self.reward_sum / max(1, self.steps)
                 done_by_death = float(info.get("episode/ended_by_death", 0.0) > 0)
 
+                mm_mean_ep = self.minimap_mean_sum / max(1, self.steps)
+                mm_std_ep = self.minimap_std_sum / max(1, self.steps)
+                mm_nonzero_ratio_ep = self.minimap_nonzero_steps / max(1, self.steps)
+
                 # ===== episode =====
                 self.logger.record("episode/steps", self.steps)
                 self.logger.record("episode/reward_total", self.reward_sum)
                 self.logger.record("episode/reward_per_step", reward_per_step)
 
-                self.logger.record("episode/reward_damage", self.reward_damage)
-                self.logger.record("episode/reward_resource", self.reward_resource)
-                self.logger.record("episode/reward_level", self.reward_level)
-                self.logger.record("episode/reward_boss_damage", self.reward_boss_damage)
-                self.logger.record("episode/reward_edge", self.reward_edge)
-                self.logger.record("episode/reward_position", self.reward_position)
-
-                self.logger.record("episode/damage_events", self.damage_events)
-                self.logger.record("episode/low_hp_steps", self.low_hp_steps)
-                self.logger.record("episode/edge_stuck_steps", self.edge_stuck_steps)
-                self.logger.record("episode/threat_high_steps", self.threat_high_steps)
+                self.logger.record("episode/minimap_mean", mm_mean_ep)
+                self.logger.record("episode/minimap_std", mm_std_ep)
+                self.logger.record("episode/minimap_nonzero_ratio", mm_nonzero_ratio_ep)
+                self.logger.record("episode/minimap_empty_steps", self.minimap_empty_steps)
 
                 self.logger.record("episode/boss_seen", float(self.boss_seen))
                 self.logger.record("episode/boss_killed", float(self.boss_killed))
-                self.logger.record("episode/post_boss_steps", self.post_boss_steps)
                 self.logger.record("episode/reached_drop_pod", float(self.reached_drop_pod))
-
                 self.logger.record("episode/done_by_death", done_by_death)
                 self.logger.record("episode/hp_end", self.last_hp)
 
@@ -348,6 +366,10 @@ class EpisodeStatsCallback(BaseCallback):
                 self.boss_kill_runs.append(float(self.boss_killed))
                 self.drop_pod_runs.append(float(self.reached_drop_pod))
 
+                self.minimap_mean_runs.append(mm_mean_ep)
+                self.minimap_std_runs.append(mm_std_ep)
+                self.minimap_nonzero_runs.append(mm_nonzero_ratio_ep)
+
                 self.logger.record("rolling/steps_mean", np.mean(self.steps_runs))
                 self.logger.record("rolling/reward_mean", np.mean(self.reward_runs))
                 self.logger.record("rolling/reward_per_step_mean", np.mean(self.reward_per_step_runs))
@@ -355,10 +377,15 @@ class EpisodeStatsCallback(BaseCallback):
                 self.logger.record("rolling/boss_kill_ratio", np.mean(self.boss_kill_runs))
                 self.logger.record("rolling/drop_pod_success_ratio", np.mean(self.drop_pod_runs))
 
+                self.logger.record("rolling/minimap_mean", np.mean(self.minimap_mean_runs))
+                self.logger.record("rolling/minimap_std", np.mean(self.minimap_std_runs))
+                self.logger.record("rolling/minimap_nonzero_ratio", np.mean(self.minimap_nonzero_runs))
+
                 self.logger.dump(self.num_timesteps)
                 self._reset_episode()
 
         return True
+
 
 
 

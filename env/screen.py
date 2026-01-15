@@ -1,6 +1,7 @@
 from mss import mss
 import numpy as np
 import cv2
+import base64
 from env.config import SCREEN_SIZE
 
 class Screen:
@@ -29,3 +30,42 @@ class Screen:
         hsv = self.to_hsv(frame)
         h = hsv[:, :, 0]  # Hue channel
         return h[:, :, None]
+
+    def process_minimap(
+            self,
+            minimap_b64: str,
+            w: int,
+            h: int,
+            out_size: int = 32,
+    ) -> np.ndarray:
+        """
+        Decode minimap from base64 and return grayscale image.
+
+        Args:
+            minimap_b64: base64-encoded RGB image
+            w, h: original minimap size
+            out_size: output size (default 29)
+
+        Returns:
+            np.ndarray (out_size, out_size), uint8 [0..255]
+        """
+
+        # --- base64 -> RGB ---
+        rgb_bytes = base64.b64decode(minimap_b64)
+        rgb = np.frombuffer(rgb_bytes, dtype=np.uint8).reshape((h, w, 3))
+
+        # flip vertically (game -> screen coords)
+        rgb = rgb[::-1]
+
+        # resize to target resolution
+        rgb = cv2.resize(
+            rgb,
+            (out_size, out_size),
+            interpolation=cv2.INTER_AREA
+        )
+
+        # RGB -> GRAYSCALE
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+
+
+        return gray.astype(np.float32) / 255.0
