@@ -1,210 +1,14 @@
 from stable_baselines3.common.callbacks import BaseCallback
 import numpy as np
-
-class SimpleStatsCallback(BaseCallback):
-    def __init__(self, verbose=0):
-        super().__init__(verbose)
-        self.episode_rewards = []
-        self.episode_lengths = []
-
-    def _on_step(self) -> bool:
-        infos = self.locals.get("infos", [])
-
-        for info in infos:
-            if "reward" in info:
-                self.episode_rewards.append(info["reward"])
-
-            if "confidence" in info:
-                self.logger.record("env/confidence", info["confidence"])
-
-            if "distance" in info:
-                self.logger.record("env/distance", info["distance"])
-
-            if "hp" in info:
-                self.logger.record("env/hp", info["hp"])
-
-            if "ui_state" in info:
-                self.logger.record("env/ui_state", hash(info["ui_state"]) % 10)
-
-        return True
-
-
-
-
-from stable_baselines3.common.callbacks import BaseCallback
-import numpy as np
-
-
-class AsyncStatsCallback(BaseCallback):
-    """
-    Non-blocking logger for TensorBoard.
-    """
-
-    def __init__(self, log_freq=200, verbose=0):
-        super().__init__(verbose)
-        self.log_freq = log_freq
-        self.last_log_step = 0
-
-    def _on_step(self) -> bool:
-        # throttle logging
-        if self.num_timesteps - self.last_log_step < self.log_freq:
-            return True
-
-        self.last_log_step = self.num_timesteps
-
-        infos = self.locals.get("infos", [])
-        if not infos:
-            return True
-
-        rewards = []
-        hp = []
-        xp = []
-        danger = []
-        edge_ds = []
-        levels = []
-
-        for info in infos:
-            if not isinstance(info, dict):
-                continue
-
-            rewards.append(info.get("reward", 0.0))
-            hp.append(info.get("hp", 0.0))
-            xp.append(info.get("xp", 0.0))
-            danger.append(info.get("danger", 0.0))
-            edge_ds.append(info.get("edge_ds", 0.0))
-            levels.append(info.get("levels", 0.0))
-
-        # ----- LOGGING -----
-        self.logger.record("env/reward", np.mean(rewards))
-        self.logger.record("env/hp", np.mean(hp))
-        self.logger.record("env/xp", np.mean(xp))
-        self.logger.record("env/edge_danger", np.mean(danger))
-        self.logger.record("env/edge_distance", np.mean(edge_ds))
-        self.logger.record("env/level", np.mean(levels))
-
-        # 🔥 THIS IS THE MISSING PIECE
-        self.logger.dump(self.num_timesteps)
-
-        return True
-
-
-
-from stable_baselines3.common.callbacks import BaseCallback
-import numpy as np
 import csv
 import os
+import time
+import subprocess
 from datetime import datetime
-
-
-class AgentStatsCallback(BaseCallback):
-    def __init__(
-        self,
-        log_freq=200,
-        csv_path="logs/agent_stats.csv",
-        verbose=0,
-    ):
-        super().__init__(verbose)
-        self.log_freq = log_freq
-        self.csv_path = csv_path
-        self.last_log_step = 0
-        self.csv_file = None
-        self.csv_writer = None
-
-    # -------------------------------------------------
-    def _on_training_start(self) -> None:
-        os.makedirs(os.path.dirname(self.csv_path), exist_ok=True)
-
-        is_new = not os.path.exists(self.csv_path)
-
-        self.csv_file = open(self.csv_path, "a", newline="")
-        self.csv_writer = csv.writer(self.csv_file)
-
-        if is_new:
-            self.csv_writer.writerow([
-                "timestamp",
-                "timesteps",
-                "reward",
-                "hp",
-                "xp",
-                "danger",
-                "edge_distance",
-                "level",
-            ])
-            self.csv_file.flush()
-
-    # -------------------------------------------------
-    def _on_step(self) -> bool:
-        if self.num_timesteps - self.last_log_step < self.log_freq:
-            return True
-
-        self.last_log_step = self.num_timesteps
-
-        infos = self.locals.get("infos", [])
-        if not infos:
-            return True
-
-        rewards = []
-        hp = []
-        xp = []
-        danger = []
-        edge_ds = []
-        levels = []
-
-        for info in infos:
-            if not isinstance(info, dict):
-                continue
-
-            rewards.append(info.get("reward", 0.0))
-            hp.append(info.get("hp", 0.0))
-            xp.append(info.get("xp", 0.0))
-            danger.append(info.get("danger", 0.0))
-            edge_ds.append(info.get("edge_ds", 0.0))
-            levels.append(info.get("levels", 0.0))
-
-        # --- aggregate ---
-        r = np.mean(rewards)
-        h = np.mean(hp)
-        x = np.mean(xp)
-        d = np.mean(danger)
-        e = np.mean(edge_ds)
-        l = np.mean(levels)
-
-        # --- TensorBoard ---
-        self.logger.record("env/reward", r)
-        self.logger.record("env/hp", h)
-        self.logger.record("env/xp", x)
-        self.logger.record("env/edge_danger", d)
-        self.logger.record("env/edge_distance", e)
-        self.logger.record("env/level", l)
-        self.logger.dump(self.num_timesteps)
-
-        # --- CSV ---
-        self.csv_writer.writerow([
-            datetime.utcnow().isoformat(),
-            self.num_timesteps,
-            round(r, 4),
-            round(h, 4),
-            round(x, 4),
-            round(d, 4),
-            round(e, 4),
-            round(l, 2),
-        ])
-        self.csv_file.flush()
-
-        return True
-
-    # -------------------------------------------------
-    def _on_training_end(self) -> None:
-        if self.csv_file:
-            self.csv_file.close()
-
 from collections import deque
-
-from collections import deque
-import numpy as np
-from stable_baselines3.common.callbacks import BaseCallback
-
-
+import win32gui
+import win32con
+import pydirectinput as pdi
 class EpisodeStatsCallback(BaseCallback):
     """
     Collects rich per-episode statistics based on structured env `info`,
@@ -385,6 +189,200 @@ class EpisodeStatsCallback(BaseCallback):
                 self._reset_episode()
 
         return True
+
+
+class GameRestartCallback(BaseCallback):
+    """
+    Перезапускает игру каждые N эпизодов чтобы избежать глюков.
+    Убивает процесс игры через taskkill и перезапускает через Steam.
+
+    После перезапуска ждёт переподключения пайпа (GameStateReader
+    автоматически переподключается в фоновом потоке).
+
+    Параметры:
+        restart_every     - каждые N эпизодов перезапускать игру
+        game_exe          - имя exe-процесса игры
+        steam_game_id     - Steam App ID (Deep Rock Galactic = 548430)
+        min_wait_seconds  - минимальное ожидание после запуска (пока грузится)
+        pipe_timeout      - максимум секунд ожидания переподключения пайпа
+    """
+
+    def __init__(
+        self,
+        restart_every: int = 50,
+        game_exe: str = "DRG Survivor.exe",
+        steam_game_id: int = 2321470,
+        min_wait_seconds: int = 30,
+        pipe_timeout: int = 300,
+        verbose: int = 1,
+    ):
+        super().__init__(verbose)
+        self.restart_every = restart_every
+        self.game_exe = game_exe
+        self.steam_game_id = steam_game_id
+        self.min_wait_seconds = min_wait_seconds
+        self.pipe_timeout = pipe_timeout
+        self.episode_count = 0
+        self._game_rect = None  # (x0, y0, x1, y1) — заполняется после фокуса
+
+    def _on_training_start(self) -> None:
+        print("\n[GameRestart] Старт обучения — запускаю игру...")
+        self._launch_game()
+
+    def _on_step(self) -> bool:
+        dones = self.locals.get("dones", [])
+        for done in dones:
+            if done:
+                self.episode_count += 1
+                if self.episode_count % self.restart_every == 0:
+                    self._restart_game()
+        return True
+
+    def _restart_game(self):
+        print(f"\n[GameRestart] Эпизод {self.episode_count}: перезапускаю игру...")
+
+        # --- убиваем процесс игры ---
+        result = subprocess.run(
+            ["taskkill", "/F", "/IM", self.game_exe],
+            capture_output=True, text=True
+        )
+        if self.verbose:
+            msg = result.stdout.strip() or result.stderr.strip()
+            print(f"[GameRestart] taskkill: {msg}")
+        time.sleep(3)
+
+        self._launch_game()
+
+    def _click(self, x, y):
+        """Надёжный клик для игр (DirectInput), абсолютные экранные координаты."""
+        pdi.moveTo(x, y)
+        time.sleep(2)
+        pdi.click()
+        time.sleep(2)
+        pdi.click()
+
+    def _click_game(self, rel_x, rel_y):
+        """Клик по координатам относительно левого верхнего угла окна игры."""
+        if self._game_rect is None:
+            print("[GameRestart] WARNING: game rect неизвестен, кликаю по абсолютным координатам")
+            self._click(rel_x, rel_y)
+            return
+        x0, y0 = self._game_rect[0], self._game_rect[1]
+        self._click(x0 + rel_x, y0 + rel_y)
+
+    def _launch_game(self):
+        # --- запускаем игру через Steam ---
+        os.startfile(f"steam://rungameid/{self.steam_game_id}")
+        print(f"[GameRestart] Запустил steam://rungameid/{self.steam_game_id}")
+
+        # --- минимальное ожидание пока грузится игра ---
+        print(f"[GameRestart] Жду минимум {self.min_wait_seconds}с пока загружается...")
+        time.sleep(self.min_wait_seconds)
+
+        # --- ждём переподключения пайпа ---
+        game_state = self._get_game_state_reader()
+        if game_state is not None:
+            print("[GameRestart] Жду переподключения пайпа...")
+            start = time.time()
+            while not game_state._connected:
+                if time.time() - start > self.pipe_timeout:
+                    print("[GameRestart] ВНИМАНИЕ: таймаут ожидания подключения пайпа!")
+                    break
+                time.sleep(1)
+            if game_state._connected:
+                print("[GameRestart] Пайп подключён. Продолжаю обучение.\n")
+                self._focus_game_window()
+                print('Клик 1')
+                self._click_game(340, 1100)
+
+                print('Клик по сохранению')
+                self._click(340, 1100)
+                print('Клик по кнопке играть')
+                self._click(400, 500)
+                print('Клик по режиму игры')
+                self._click(400, 500)
+                print('Клик по карте')
+                self._click(400, 600)
+                print('Клик по персонажу')
+                self._click(500, 550)
+                print('Клик по спеку')
+                self._click(400, 600)
+                print('Клик по сложности')
+                self._click(1200, 600)
+
+
+        else:
+            print("[GameRestart] Не удалось получить GameStateReader, продолжаю без проверки пайпа.\n")
+
+    def _focus_game_window(self):
+        """Находит окно игры, выводит на передний план и сохраняет его rect."""
+        import ctypes
+        import win32process
+        import psutil
+
+        exe_base = self.game_exe.replace(".exe", "").lower()
+        hwnd_found = []
+
+        def _enum_cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            try:
+                if exe_base in psutil.Process(pid).name().lower():
+                    hwnd_found.append(hwnd)
+            except Exception:
+                pass
+
+        win32gui.EnumWindows(_enum_cb, None)
+
+        if not hwnd_found:
+            print("[GameRestart] Game window not found, skipping focus")
+            self._game_rect = None
+            return
+
+        hwnd = hwnd_found[0]
+
+        # Восстанавливаем из минимизации
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        time.sleep(0.5)
+
+        # AttachThreadInput надёжнее Alt-трюка — позволяет захватить фокус из фона
+        current_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+        target_tid, _ = win32process.GetWindowThreadProcessId(hwnd)
+        attached = ctypes.windll.user32.AttachThreadInput(current_tid, target_tid, True)
+        try:
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            win32gui.BringWindowToTop(hwnd)
+        finally:
+            if attached:
+                ctypes.windll.user32.AttachThreadInput(current_tid, target_tid, False)
+
+        time.sleep(1.0)
+
+        # Проверяем что фокус реально получен
+        active = win32gui.GetForegroundWindow()
+        if active != hwnd:
+            print(f"[GameRestart] WARNING: window did not get focus (active={active}, target={hwnd})")
+        else:
+            print(f"[GameRestart] Game window focused (hwnd={hwnd})")
+
+        # Сохраняем позицию окна — нужна для корректных кликов на любом мониторе
+        self._game_rect = win32gui.GetWindowRect(hwnd)
+        x0, y0, x1, y1 = self._game_rect
+        print(f"[GameRestart] Window rect: ({x0}, {y0}) — ({x1}, {y1})")
+
+    def _get_game_state_reader(self):
+        """Достаём GameStateReader из вложенного DRGEnv."""
+        try:
+            # VecNormalize → DummyVecEnv → DRGEnv
+            env = self.training_env
+            if hasattr(env, "venv"):
+                env = env.venv
+            if hasattr(env, "envs"):
+                return env.envs[0].game_state
+        except Exception as e:
+            print(f"[GameRestart] Не удалось получить game_state: {e}")
+        return None
 
 
 

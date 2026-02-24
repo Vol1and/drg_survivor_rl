@@ -9,7 +9,26 @@ import pywintypes
 class GameStateReader:
     def __init__(self, pipe_name=r"\\.\pipe\drg_rl"):
         self.pipe_name = pipe_name
-        self.latest = None
+        self.latest = {
+            "phase": "Loading",
+            "is_mining": False,
+            "grounded": False,
+            "nearest_enemy_distance": 30.0,
+            "average_enemy_distance": 30.0,
+            "enemies_in_radius": 0,
+            "has_drop_pod": False,
+            "drop_pod_distance": 100.0,
+            "level": 0,
+            "nitra": 0,
+            "gold": 0,
+            "hp": 1.0,
+            "boss_hp": 0.0,
+            "pos": {"x": 50.0, "z": 50.0},
+            "is_boss": False,
+            "is_boss_dead": False,
+            "move_speed": 0.0,
+            "boss_distance": 30.0,
+        }
 
         self._running = True
         self._buffer = ""

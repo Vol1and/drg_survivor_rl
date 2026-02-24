@@ -47,6 +47,7 @@ class RewardFunction:
 
         self.edge_zone_start = 0.25
         self.edge_zone_end = 0.75
+        self.last_edge_penalty = 0.0
 
         # ==================================================
         # THREAT / OBJECTIVE
@@ -59,6 +60,7 @@ class RewardFunction:
     # ==================================================
     def reset(self):
         self.edge_stuck_counter = 0
+        self.last_edge_penalty = 0.0
         self.is_boss_spawn_reward_acquired = False
         self.is_boss_death_reward_acquired = False
 
@@ -191,7 +193,8 @@ class RewardFunction:
             self.edge_stuck_counter *= 0.9
 
         stuck_ratio = min(self.edge_stuck_counter / self.edge_stuck_frames, 1.0)
-        return np.clip(stuck_ratio * self.edge_penalty_weight, -1.0, 1.0)
+        self.last_edge_penalty = float(np.clip(stuck_ratio * self.edge_penalty_weight, -1.0, 1.0))
+        return self.last_edge_penalty
 
     def _position_penalty(self, position):
         x, z = position

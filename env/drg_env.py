@@ -8,7 +8,7 @@ import numpy as np
 from env.screen import Screen
 from env.logic.reward import RewardFunction
 from env.ui.ui_controller import UIController
-from env.config import SCREEN_SIZE
+from env.config import SCREEN_SIZE, MINIMAP_SIZE
 from env.state.game_state import GameStateReader
 from env.state.linear_tracker import LinearTracker
 from env.state.fraction_tracker import FractionTracker
@@ -54,7 +54,7 @@ class DRGEnv(gym.Env):
             "image": spaces.Box(
                 low=0,
                 high=255,
-                shape=(SCREEN_SIZE, SCREEN_SIZE, 1),
+                shape=(SCREEN_SIZE, SCREEN_SIZE, 2),
                 dtype=np.uint8
             ),
             "hp": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32),
@@ -78,10 +78,10 @@ class DRGEnv(gym.Env):
                 dtype=np.float32
             ),
             "minimap": spaces.Box(
-                low=0.0,
-                high=1.0,
-                shape=(32, 32),
-                dtype=np.float32
+                low=0,
+                high=255,
+                shape=(MINIMAP_SIZE, MINIMAP_SIZE, 1),
+                dtype=np.uint8
             )
         })
 
@@ -110,7 +110,7 @@ class DRGEnv(gym.Env):
             "flags": np.zeros(2, dtype=np.float32),
             "threat": np.zeros(4, dtype=np.float32),
             "objective": np.zeros(3, dtype=np.float32),
-            "minimap": np.zeros((32, 32), dtype=np.float32),
+            "minimap": np.zeros((MINIMAP_SIZE, MINIMAP_SIZE, 1), dtype=np.uint8),
         }
 
         return self.obs, {}
@@ -122,7 +122,8 @@ class DRGEnv(gym.Env):
 
         reward = 0.0
 
-        new_ui_state = self.extract_ui_from_state()
+        state = self.game_state.get()
+        new_ui_state = self.extract_ui_from_state(state)
 
         if new_ui_state is not None:
             self.ui_state = new_ui_state
@@ -133,7 +134,7 @@ class DRGEnv(gym.Env):
             self.current_step += 1
 
             self.controller.step(action)
-            self.frame = self.screen.grab()
+            self.frame, minimap = self.screen.grab_all()
 
             (is_mining,
              is_grounded,
@@ -153,8 +154,7 @@ class DRGEnv(gym.Env):
              is_boss,
              is_boss_dead,
              boss_distance,
-             minimap
-             ) = self.extract_info_from_state()
+             ) = self.extract_info_from_state(state)
 
             level_delta = self.level_tracker.get_delta(level)
             nitra_delta = self.nitra_tracker.get_delta(nitra)
@@ -215,8 +215,7 @@ class DRGEnv(gym.Env):
                 average_enemy_distance=average_enemy_distance,
                 enemies_in_radius=enemies_in_radius,
                 has_drop_pod=has_drop_pod,
-                drop_pod_distance=drop_pod_distance,
-                minimap=minimap
+                drop_pod_distance=drop_pod_distance
             )
 
         done = (
@@ -244,8 +243,7 @@ class DRGEnv(gym.Env):
         elif ui_state == "Shop":
             self.ui_controller.handle_shop()
 
-    def extract_info_from_state(self):
-        state = self.game_state.get()
+    def extract_info_from_state(self, state):
 
         is_mining = state['is_mining']
         is_grounded = state['grounded']
@@ -266,14 +264,6 @@ class DRGEnv(gym.Env):
         move_speed = np.clip(float(state.get("move_speed", 0.0)) / 10.0, 0.0, 1.0)
         boss_distance = np.clip(state['boss_distance'] / 30.0, 0.0, 1.0)
 
-        raw_mm = state.get("minimap_icon")
-        w = state.get("minimap_w")
-        h = state.get("minimap_h")
-
-        if raw_mm is not None:
-            minimap = self.screen.process_minimap(raw_mm, w, h)
-        else:
-            minimap = np.zeros((32, 32), dtype=np.float32)
 
         return (is_mining,
                 is_grounded,
@@ -292,12 +282,10 @@ class DRGEnv(gym.Env):
                 move_speed,
                 is_boss,
                 is_boss_dead,
-                boss_distance,
-                minimap
+                boss_distance
                 )
 
-    def extract_ui_from_state(self):
-        state = self.game_state.get()
+    def extract_ui_from_state(self, state):
         return state.get('phase', None)
 
     def _compute_edge_features(self, x, z, move_speed):
@@ -359,8 +347,7 @@ class DRGEnv(gym.Env):
         average_enemy_distance,
         enemies_in_radius,
         has_drop_pod,
-        drop_pod_distance,
-            minimap
+        drop_pod_distance
     ):
         info = {
             # --- episode ---
@@ -379,19 +366,12 @@ class DRGEnv(gym.Env):
             "reward/boss_damage": -self.boss_hp_tracker.last_delta if self.boss_hp_tracker.last_delta < 0 else 0.0,
             "reward/boss_spawn": float(is_boss and not self.reward_fn.is_boss_spawn_reward_acquired),
             "reward/boss_death": float(is_boss_dead),
-            "reward/edge": self.reward_fn._edge_penalty(edge),
-            "reward/position": self.reward_fn._position_penalty((0.5, 0.5)),  # approx center penalty
+            "reward/edge": self.reward_fn.last_edge_penalty,
 
             # --- hp ---
             "hp/value": hp_val,
             "hp/delta": hp_delta,
             "hp/low": float(hp_val < 0.3),
-
-            "minimap/mean": float(np.mean(minimap)),
-            "minimap/std": float(np.std(minimap)),
-            "minimap/min": float(np.min(minimap)),
-            "minimap/max": float(np.max(minimap)),
-            "minimap/nonzero_ratio": float(np.count_nonzero(minimap) / minimap.size),
 
             # --- threat ---
             "threat/nearest": nearest_enemy_distance,
