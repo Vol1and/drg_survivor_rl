@@ -4,7 +4,7 @@ import pydirectinput
 
 class UIController:
     def __init__(self):
-        self.levelup_click_pos = (836, 555)
+        self.levelup_click_pos = (900, 600)
         self.overclock_click_pos = (836, 555)
         self.death_restart_click_pos = (950, 1465)
         self.continue_button_pos = (1150, 1375)
@@ -14,7 +14,7 @@ class UIController:
         pydirectinput.PAUSE = 0
         pydirectinput.FAILSAFE = False
 
-        self.click_delay = 0.1  # безопасная задержка
+        self.click_delay = 0.2  # безопасная задержка
 
     def _click(self, x, y):
         """
@@ -27,7 +27,7 @@ class UIController:
     def handle_levelup(self):
         print(f"[UI] Levelup click at {self.levelup_click_pos}")
         self._click(*self.levelup_click_pos)
-        time.sleep(0.3)
+        time.sleep(0.5)
 
     def handle_continue_button(self):
         print(f"[UI] Continue click at {self.continue_button_pos}")

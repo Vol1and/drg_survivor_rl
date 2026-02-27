@@ -4,7 +4,7 @@ import time
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-
+import datetime
 from env.screen import Screen
 from env.logic.reward import RewardFunction
 from env.ui.ui_controller import UIController
@@ -118,17 +118,29 @@ class DRGEnv(gym.Env):
     # =====================================================
     # STEP
     # =====================================================
+
+    def wait_for_gameplay(self):
+        while True:
+            state = self.game_state.get()
+
+            new_ui_state = self.extract_ui_from_state(state)
+
+            self.manage_ui(new_ui_state)
+            if new_ui_state is not None:
+                self.ui_state = new_ui_state
+            if self.ui_state == "Gameplay" or self.ui_state == "Death":
+                return
+            else:
+                time.sleep(0.5)
+
+
     def step(self, action: int):
 
         reward = 0.0
 
         state = self.game_state.get()
-        new_ui_state = self.extract_ui_from_state(state)
 
-        if new_ui_state is not None:
-            self.ui_state = new_ui_state
-
-        self.manage_ui(self.ui_state)
+        self.wait_for_gameplay()
 
         if self.ui_state == "Gameplay":
             self.current_step += 1
@@ -238,10 +250,9 @@ class DRGEnv(gym.Env):
             self.ui_controller.handle_death_restart()
         elif ui_state == "Overclock":
             self.ui_controller.handle_overclock()
-        elif ui_state == "Loading":
-            self.controller.idle_step()
         elif ui_state == "Shop":
             self.ui_controller.handle_shop()
+
 
     def extract_info_from_state(self, state):
 

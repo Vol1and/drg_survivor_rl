@@ -1,7 +1,7 @@
 import time
 import pydirectinput as pdi
 
-GAME_SPEED = 3.5
+GAME_SPEED = 2
 
 class MovementController:
     """
@@ -91,7 +91,7 @@ class MovementController:
         self._release_current()
 
     def idle_step(self):
-        time.sleep(self.step_time)
+        time.sleep(1)
     # ------------------------------------------------
     # INTERNAL
     # ------------------------------------------------
