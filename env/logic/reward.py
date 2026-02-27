@@ -82,45 +82,39 @@ class RewardFunction:
         objective=None,    # [has_pod, pod_dist, is_post_boss]
         edge_features=None,
         position=None,
-    ) -> float:
+    ) -> tuple[float, dict]:
 
-        reward = 0.0
-
-        # --- HP scaling (never goes to zero)
         hp_scale = 0.25 + 0.75 * hp_fraction
 
-        # --- Core survival & damage
-        reward += self._survival_reward(threat)
-        reward += self._damage_penalty(hp_delta, hp_fraction)
-
-        # --- Progression
-        reward += self._resource_reward(gold_delta, nitra_delta) * hp_scale
-        reward += level_delta * self.levelup_reward * hp_scale
-
-        # --- Boss logic
-        reward += self._boss_reward(
+        survival  = self._survival_reward(threat)
+        damage    = self._damage_penalty(hp_delta, hp_fraction)
+        resource  = self._resource_reward(gold_delta, nitra_delta) * hp_scale
+        level_rew = level_delta * self.levelup_reward * hp_scale
+        boss_rew  = self._boss_reward(
             is_boss=is_boss,
             is_boss_dead=is_boss_dead,
             boss_hp_delta=boss_hp_delta,
             hp_scale=hp_scale,
         )
+        threat_pen = self._threat_penalty(threat, hp_fraction) if threat is not None else 0.0
+        escape_rew = self._escape_reward(objective, hp_scale) if objective is not None else 0.0
+        edge_pen   = self._edge_penalty(edge_features) if edge_features is not None else 0.0
+        pos_pen    = self._position_penalty(position) if position is not None else 0.0
 
-        # --- Threat pressure
-        if threat is not None:
-            reward += self._threat_penalty(threat, hp_fraction)
+        components = {
+            "survival": survival,
+            "damage":   damage,
+            "resource": resource,
+            "level":    level_rew,
+            "boss":     boss_rew,
+            "threat":   threat_pen,
+            "escape":   escape_rew,
+            "edge":     edge_pen,
+            "position": pos_pen,
+        }
 
-        # --- Escape objective (post-boss)
-        if objective is not None:
-            reward += self._escape_reward(objective, hp_scale)
-
-        # --- Edge / position
-        if edge_features is not None:
-            reward += self._edge_penalty(edge_features)
-
-        if position is not None:
-            reward += self._position_penalty(position)
-
-        return float(np.clip(reward, self.min_reward, self.max_reward))
+        total = float(np.clip(sum(components.values()), self.min_reward, self.max_reward))
+        return total, components
 
     # ==================================================
     # COMPONENTS

@@ -46,6 +46,16 @@ class DRGEnv(gym.Env):
         self.controller = MovementController()
 
         # ----------------------------
+        # Episode accumulators
+        # ----------------------------
+        self.episode_reward = 0.0
+        self.episode_damage_taken = 0.0
+        self.episode_gold_collected = 0.0
+        self.episode_nitra_collected = 0.0
+        self.episode_start_time = time.time()
+        self._boss_spawn_fired = False
+
+        # ----------------------------
         # Gym spaces
         # ----------------------------
         self.action_space = spaces.Discrete(5)
@@ -92,6 +102,12 @@ class DRGEnv(gym.Env):
         super().reset(seed=seed)
 
         self.current_step = 0
+        self.episode_reward = 0.0
+        self.episode_damage_taken = 0.0
+        self.episode_gold_collected = 0.0
+        self.episode_nitra_collected = 0.0
+        self.episode_start_time = time.time()
+        self._boss_spawn_fired = False
         self.controller.reset()
         self.reward_fn.reset()
 
@@ -185,7 +201,11 @@ class DRGEnv(gym.Env):
             objective = np.array([has_drop_pod, drop_pod_distance,1.0 if is_boss_dead else 0.0],
                                       dtype=np.float32)
 
-            reward = self.reward_fn.compute(
+            boss_spawn_fired = is_boss and not self._boss_spawn_fired
+            if is_boss:
+                self._boss_spawn_fired = True
+
+            reward, reward_components = self.reward_fn.compute(
                 hp_delta=hp_delta,
                 level_delta=level_delta,
                 nitra_delta=nitra_delta,
@@ -203,6 +223,13 @@ class DRGEnv(gym.Env):
             if not np.isfinite(reward):
                 reward = 0.0
 
+            # Accumulate episode stats
+            self.episode_reward += reward
+            if hp_delta < 0:
+                self.episode_damage_taken += abs(hp_delta)
+            self.episode_gold_collected += max(0.0, gold_delta)
+            self.episode_nitra_collected += max(0.0, nitra_delta)
+
             self.obs = {
                 "image": self.screen.process_for_obs(self.frame),
                 "hp": hp,
@@ -211,11 +238,11 @@ class DRGEnv(gym.Env):
                 "threat": threat,
                 "objective": objective,
                 "minimap": minimap
-
             }
 
             self.info = self._build_info(
                 reward=reward,
+                reward_components=reward_components,
                 hp_val=hp_val,
                 hp_delta=hp_delta,
                 edge=edge,
@@ -223,11 +250,16 @@ class DRGEnv(gym.Env):
                 is_grounded=is_grounded,
                 is_boss=is_boss,
                 is_boss_dead=is_boss_dead,
+                boss_spawn_fired=boss_spawn_fired,
                 nearest_enemy_distance=nearest_enemy_distance,
                 average_enemy_distance=average_enemy_distance,
                 enemies_in_radius=enemies_in_radius,
                 has_drop_pod=has_drop_pod,
-                drop_pod_distance=drop_pod_distance
+                drop_pod_distance=drop_pod_distance,
+                level=level,
+                boss_hp=boss_hp,
+                pos_x=pos_x,
+                pos_z=pos_z,
             )
 
         done = (
@@ -237,6 +269,20 @@ class DRGEnv(gym.Env):
 
         if done:
             reward = self.reward_fn.get_death_reward()
+            self.episode_reward += reward
+            elapsed = time.time() - self.episode_start_time
+            self.info["episode"] = {
+                "r": self.episode_reward,
+                "l": self.current_step,
+                "t": elapsed,
+            }
+            self.info["episode/total_reward"] = self.episode_reward
+            self.info["episode/damage_taken"] = self.episode_damage_taken
+            self.info["episode/gold_collected"] = self.episode_gold_collected
+            self.info["episode/nitra_collected"] = self.episode_nitra_collected
+            self.info["episode/steps_per_second"] = self.current_step / max(elapsed, 1e-6)
+            self.info["episode/ended_by_death"] = float(self.ui_state == "Death")
+            self.info["episode/ended_by_timeout"] = float(self.current_step >= self.max_steps)
 
         return self.obs, reward, done, False, self.info
 
@@ -347,6 +393,7 @@ class DRGEnv(gym.Env):
         self,
         *,
         reward,
+        reward_components,
         hp_val,
         hp_delta,
         edge,
@@ -354,59 +401,66 @@ class DRGEnv(gym.Env):
         is_grounded,
         is_boss,
         is_boss_dead,
+        boss_spawn_fired,
         nearest_enemy_distance,
         average_enemy_distance,
         enemies_in_radius,
         has_drop_pod,
-        drop_pod_distance
+        drop_pod_distance,
+        level,
+        boss_hp,
+        pos_x,
+        pos_z,
     ):
         info = {
-            # --- episode ---
+            # --- episode (per-step) ---
             "episode/step": self.current_step,
-            "episode/ended_by_death": float(self.ui_state == "Death"),
-            "episode/ended_by_timeout": float(self.current_step >= self.max_steps),
 
-            # --- reward ---
-            "reward/total": reward,
-            "reward/damage": hp_delta * self.reward_fn.damage_multiplier if hp_delta < 0 else 0.0,
-            "reward/resource": (
-                self.reward_fn.gold_weight * self.gold_tracker.last_delta +
-                self.reward_fn.nitra_weight * self.nitra_tracker.last_delta
-            ),
-            "reward/level": self.level_tracker.last_delta * self.reward_fn.levelup_reward,
-            "reward/boss_damage": -self.boss_hp_tracker.last_delta if self.boss_hp_tracker.last_delta < 0 else 0.0,
-            "reward/boss_spawn": float(is_boss and not self.reward_fn.is_boss_spawn_reward_acquired),
-            "reward/boss_death": float(is_boss_dead),
-            "reward/edge": self.reward_fn.last_edge_penalty,
+            # --- reward components ---
+            "reward/total":    reward,
+            "reward/survival": reward_components["survival"],
+            "reward/damage":   reward_components["damage"],
+            "reward/resource": reward_components["resource"],
+            "reward/level":    reward_components["level"],
+            "reward/boss":     reward_components["boss"],
+            "reward/threat":   reward_components["threat"],
+            "reward/escape":   reward_components["escape"],
+            "reward/edge":     reward_components["edge"],
+            "reward/position": reward_components["position"],
+            "reward/boss_spawn": float(boss_spawn_fired),
 
             # --- hp ---
             "hp/value": hp_val,
             "hp/delta": hp_delta,
-            "hp/low": float(hp_val < 0.3),
+            "hp/low":   float(hp_val < 0.3),
 
             # --- threat ---
-            "threat/nearest": nearest_enemy_distance,
-            "threat/average": average_enemy_distance,
-            "threat/density": enemies_in_radius,
-            "threat/high": float(nearest_enemy_distance < 0.2 and enemies_in_radius > 0.5),
+            "threat/nearest":  nearest_enemy_distance,
+            "threat/average":  average_enemy_distance,
+            "threat/density":  enemies_in_radius,
+            "threat/high":     float(nearest_enemy_distance < 0.2 and enemies_in_radius > 0.5),
 
             # --- objective ---
-            "objective/has_drop_pod": has_drop_pod,
+            "objective/has_drop_pod":    has_drop_pod,
             "objective/drop_pod_distance": drop_pod_distance,
-            "objective/boss_dead": float(is_boss_dead),
-            "objective/reaching_pod": float(has_drop_pod and drop_pod_distance < 0.3),
+            "objective/boss_dead":       float(is_boss_dead),
+            "objective/reaching_pod":    float(has_drop_pod and drop_pod_distance < 0.3),
 
             # --- edge ---
-            "edge/distance": edge[1],
-            "edge/stuck": float(edge[1] < 0.1),
+            "edge/distance":   edge[1],
+            "edge/stuck":      float(edge[1] < 0.1),
             "edge/move_speed": edge[0],
 
             # --- state ---
-            "state/is_mining": float(is_mining),
-            "state/is_grounded": float(is_grounded),
-            "state/is_boss": float(is_boss),
+            "state/is_mining":    float(is_mining),
+            "state/is_grounded":  float(is_grounded),
+            "state/is_boss":      float(is_boss),
             "state/is_post_boss": float(is_boss_dead),
-            "state/ui": self.ui_state,
+            "state/level":        level,
+            "state/boss_hp":      boss_hp,
+            "state/pos_x":        pos_x,
+            "state/pos_z":        pos_z,
+            "state/ui":           self.ui_state,
         }
 
         return info
