@@ -298,6 +298,8 @@ class DRGEnv(gym.Env):
             self.ui_controller.handle_overclock()
         elif ui_state == "Shop":
             self.ui_controller.handle_shop()
+        elif ui_state == "Loading":
+            self.ui_controller.handle_loading()
 
 
     def extract_info_from_state(self, state):

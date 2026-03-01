@@ -52,3 +52,8 @@ class UIController:
         print(f"[UI] Shop click at {self.shop_button_pos}")
         self._click(*self.shop_button_pos)
         time.sleep(4)
+
+    def handle_loading(self):
+        print(f"[UI] Loading idle click")
+        self._click(0, 0)
+        time.sleep(1)
